@@ -1,0 +1,6 @@
+{
+  "name": "AB Gym",
+  "description": "Premium gym management portal with online registration, roll number generation, fee payments, membership management, downloadable PDF receipts, and admin dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+html, body {
+  overflow-x: hidden;
+  width: 100%;
+}
+
+@layer base {
+  body {
+    background-color: #050505;
+    color: #f5f5f4;
+    font-family: "Inter", "Arial", sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6, .font-display {
+    font-family: "Inter", "Arial", sans-serif;
+  }
+}
+
+/* Hero Content Wrapper */
+.hero-content-wrapper {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding-left: clamp(24px, 5vw, 72px);
+  padding-right: clamp(24px, 5vw, 72px);
+  box-sizing: border-box;
+}
+
+/* Main Hero Title Typography */
+.hero-heading {
+  font-family: "Arial Black", "Montserrat", "Inter", sans-serif;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: -0.04em;
+  line-height: 0.92;
+  font-size: clamp(3rem, 8vw, 7rem);
+  max-width: 100%;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+@media (max-width: 767px) {
+  .hero-heading {
+    font-size: clamp(3rem, 15vw, 5.4rem);
+    line-height: 0.9;
+    letter-spacing: -0.05em;
+  }
+}
+
+/* Small Hero Label */
+.hero-label {
+  font-size: clamp(0.85rem, 1.2vw, 1.15rem);
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+/* Hero Paragraph Typography */
+.hero-paragraph {
+  font-size: clamp(1rem, 1.5vw, 1.25rem);
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.65);
+  max-width: 520px;
+  font-weight: 400;
+}
+
+/* Action Button Typography */
+.btn-hero {
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Custom accent color utility helpers */
+.bg-accent {
+  background-color: #2563EB;
+}
+.text-accent {
+  color: #2563EB;
+}
+.border-accent {
+  border-color: #2563EB;
+}
+
+/* Mobile Action & Statistics Layout (< 768px) */
+@media (max-width: 767px) {
+  .mobile-action-stats-wrapper {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    gap: 20px;
+    box-sizing: border-box;
+  }
+
+  .action-buttons {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .action-buttons button,
+  .action-buttons a {
+    width: 100%;
+    min-height: 52px;
+    border-radius: 16px;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    width: 100%;
+  }
+}
+
+/* Touch scroll optimizations */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent auto-zoom on iOS inputs */
+@media (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
