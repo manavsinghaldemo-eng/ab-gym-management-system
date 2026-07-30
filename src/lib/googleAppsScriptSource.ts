@@ -164,7 +164,8 @@ function handleAction(action, data, token) {
 
   // Public Actions
   if (action === 'registerMember' || action === 'submitRegistration') return handleRegisterMember(data);
-  if (action === 'getRegistrationForFee') return handleGetRegistrationForFee(data);
+  if (action === 'getRegistrationForFee' || action === 'getMemberForFee') return handleGetRegistrationForFee(data);
+  if (action === 'getMemberFeeHistory' || action === 'getMemberPaymentHistory' || action === 'getFeeHistory') return handleGetMemberFeeHistory(data);
   if (action === 'submitFee' || action === 'submitFeePayment') return handleSubmitFee(data);
   if (action === 'checkRegistrationStatus') return handleCheckRegistrationStatus(data);
   if (action === 'sendConfirmationEmail') return handleSendConfirmationEmail(data);
@@ -307,107 +308,458 @@ function handleRegisterMember(data) {
   }
 }
 
-// 2. Get Registration For Fee Verification
+// Date Normalization Helper for Google Sheets and Web inputs
+function normalizeDateValue(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return '';
+    var y = val.getFullYear();
+    var m = String(val.getMonth() + 1);
+    if (m.length < 2) m = '0' + m;
+    var d = String(val.getDate());
+    if (d.length < 2) d = '0' + d;
+    return y + '-' + m + '-' + d;
+  }
+
+  var str = String(val).trim();
+  if (!str) return '';
+
+  if (str.indexOf('T') !== -1) {
+    str = str.split('T')[0];
+  }
+  if (str.indexOf(' ') !== -1) {
+    str = str.split(' ')[0];
+  }
+
+  str = str.replace(/\//g, '-');
+  var parts = str.split('-');
+  if (parts.length === 3) {
+    var p0 = parseInt(parts[0], 10);
+    var p1 = parseInt(parts[1], 10);
+    var p2 = parseInt(parts[2], 10);
+
+    if (!isNaN(p0) && !isNaN(p1) && !isNaN(p2)) {
+      if (parts[0].length === 4) {
+        var mm = String(p1);
+        if (mm.length < 2) mm = '0' + mm;
+        var dd = String(p2);
+        if (dd.length < 2) dd = '0' + dd;
+        return parts[0] + '-' + mm + '-' + dd;
+      }
+      if (parts[2].length === 4) {
+        var mm, dd;
+        if (p1 > 12 && p0 <= 12) {
+          mm = String(p0);
+          dd = String(p1);
+        } else {
+          mm = String(p1);
+          dd = String(p0);
+        }
+        if (mm.length < 2) mm = '0' + mm;
+        if (dd.length < 2) dd = '0' + dd;
+        return parts[2] + '-' + mm + '-' + dd;
+      }
+    }
+  }
+
+  try {
+    var parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      var y = parsed.getFullYear();
+      var m = String(parsed.getMonth() + 1);
+      if (m.length < 2) m = '0' + m;
+      var d = String(parsed.getDate());
+      if (d.length < 2) d = '0' + d;
+      return y + '-' + m + '-' + d;
+    }
+  } catch (e) {}
+
+  return str;
+}
+
+// 2. Get Member / Registration For Fee Verification
+function extractFirst4Digits(phone) {
+  var digits = String(phone || "").replace(/\D/g, "");
+  var tenDigitPhone = digits.length > 10 ? digits.slice(-10) : digits;
+  return tenDigitPhone.slice(0, 4);
+}
+
 function handleGetRegistrationForFee(data) {
   try {
-    var queryRef = cleanString(data.registrationRefOrRoll || data.registrationRef || data.rollNumber).toUpperCase();
-    var mobileLast4 = cleanString(data.mobileLast4).replace(/\D/g, '');
+    var rawRef = cleanString(data.referenceOrRollNumber || data.registrationRefOrRoll || data.registrationRef || data.rollNumber);
+    var queryRefClean = rawRef.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    var submittedPhoneFirst4 = extractFirst4Digits(data.phoneFirst4 || data.phoneLast4 || data.mobileLast4 || data.phone);
+    var submittedDob = normalizeDateValue(data.dateOfBirth || data.dob);
 
-    if (!queryRef || !mobileLast4) {
+    Logger.log("[Verification Debug] Submitted Ref: " + rawRef + " (" + queryRefClean + ") | Phone First4: " + submittedPhoneFirst4 + " | DOB: " + submittedDob);
+
+    if (!queryRefClean) {
       return createJsonResponse({
         success: false,
-        message: 'Registration Reference Number (or Roll Number) and registered mobile last 4 digits are required.'
+        code: 'DETAILS_MISMATCH',
+        message: 'Member details do not match. Please check the entered information.'
       });
     }
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var matchedRow = null;
 
-    // 1. Search Registrations sheet
-    var regSheet = ss.getSheetByName(SHEETS.REGISTRATIONS);
-    var regRows = getSheetObjects(regSheet);
-
-    for (var i = 0; i < regRows.length; i++) {
-      var r = regRows[i];
-      var rRef = cleanString(r['Registration Reference Number']).toUpperCase();
-      var rRoll = cleanString(r['Roll Number']).toUpperCase();
-
-      if (rRef === queryRef || (rRoll && rRoll === queryRef && rRoll !== 'UNASSIGNED')) {
-        var phone = cleanString(r['Phone Number']).replace(/\D/g, '');
-        if (phone.slice(-4) !== mobileLast4) {
-          return createJsonResponse({
-            success: false,
-            message: 'Mobile number verification failed. Please enter the correct last 4 digits of your registered phone number.'
-          });
-        }
-
-        var maskedPhone = '******' + mobileLast4;
-
-        return createJsonResponse({
-          success: true,
-          message: 'Registration verified successfully.',
-          data: {
-            registrationRef: r['Registration Reference Number'],
-            rollNumber: r['Roll Number'] !== 'Unassigned' ? r['Roll Number'] : '',
-            fullName: r['Full Name'],
-            maskedPhone: maskedPhone,
-            emailAddress: r['Email Address'] || '',
-            selectedPlan: r['Selected Plan'] || '',
-            joiningDate: r['Joining Date'] || '',
-            registrationFee: parseFloat(r['Registration Fee']) || 100,
-            registrationStatus: r['Registration Status'] || 'Pending Verification',
-            paymentStatus: r['Payment Status'] || 'Not Submitted'
-          }
-        });
-      }
-    }
-
-    // 2. Fallback: Search Members sheet by Roll Number
+    // 1. Search Members sheet first
     var memSheet = ss.getSheetByName(SHEETS.MEMBERS);
-    var memRows = getSheetObjects(memSheet);
+    if (memSheet) {
+      var memRows = getSheetObjects(memSheet);
+      for (var j = 0; j < memRows.length; j++) {
+        var m = memRows[j];
+        var mRollClean = cleanString(m['Roll Number'] || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        var mRefClean = cleanString(m['Registration Reference Number'] || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-    for (var j = 0; j < memRows.length; j++) {
-      var m = memRows[j];
-      var mRoll = cleanString(m['Roll Number']).toUpperCase();
+        var memRefMatched = (mRollClean && mRollClean === queryRefClean) || (mRefClean && mRefClean === queryRefClean);
+        if (memRefMatched) {
+          var mPhoneRaw = m['Phone Number'] || m['Phone'] || m['Mobile Number'] || '';
+          var mPhoneFirst4 = extractFirst4Digits(mPhoneRaw);
+          var mPhoneMatched = (!submittedPhoneFirst4 || !mPhoneFirst4 || submittedPhoneFirst4 === mPhoneFirst4);
 
-      if (mRoll === queryRef) {
-        var mPhone = cleanString(m['Phone Number']).replace(/\D/g, '');
-        if (mPhone.slice(-4) !== mobileLast4) {
-          return createJsonResponse({
-            success: false,
-            message: 'Mobile number verification failed. Please enter the correct last 4 digits of your registered phone number.'
-          });
-        }
+          var mDob = normalizeDateValue(m['Date of Birth'] || m['DOB']);
+          var mDobMatched = (!mDob || !submittedDob || mDob === submittedDob);
 
-        return createJsonResponse({
-          success: true,
-          message: 'Member verified successfully.',
-          data: {
-            registrationRef: m['Registration Reference Number'] || '',
-            rollNumber: m['Roll Number'],
-            fullName: m['Full Name'],
-            maskedPhone: '******' + mobileLast4,
-            emailAddress: m['Email Address'] || '',
-            selectedPlan: m['Selected Plan'] || '',
-            joiningDate: m['Joining Date'] || '',
-            registrationFee: 100,
-            registrationStatus: 'Approved',
-            paymentStatus: m['Last Payment Status'] || 'Successful',
-            memberStatus: m['Member Status'] || 'Active'
+          if (mPhoneMatched && mDobMatched) {
+            matchedRow = {
+              fullName: m['Full Name'] || '',
+              rollNumber: m['Roll Number'] || '',
+              registrationReference: m['Registration Reference Number'] || '',
+              phone: m['Phone Number'] || '',
+              selectedPlan: m['Selected Plan'] || m['Plan Name'] || '',
+              joiningDate: m['Joining Date'] || m['Membership Start Date'] || '',
+              registrationStatus: 'Approved',
+              emailAddress: m['Email Address'] || '',
+              registrationFee: 100
+            };
+            break;
           }
-        });
+        }
       }
     }
 
+    // 2. Search Registrations sheet if not found in Members
+    if (!matchedRow) {
+      var regSheet = ss.getSheetByName(SHEETS.REGISTRATIONS);
+      if (regSheet) {
+        var regRows = getSheetObjects(regSheet);
+        for (var i = 0; i < regRows.length; i++) {
+          var r = regRows[i];
+          var rRefClean = cleanString(r['Registration Reference Number'] || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+          var rRollClean = cleanString(r['Roll Number'] || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+          var refMatched = (rRefClean && rRefClean === queryRefClean) || (rRollClean && rRollClean === queryRefClean && rRollClean !== 'UNASSIGNED');
+          if (refMatched) {
+            var storedPhoneRaw = r['Phone Number'] || r['Phone'] || r['Mobile Number'] || '';
+            var storedPhoneFirst4 = extractFirst4Digits(storedPhoneRaw);
+            var phoneMatched = (!submittedPhoneFirst4 || !storedPhoneFirst4 || submittedPhoneFirst4 === storedPhoneFirst4);
+
+            var rDob = normalizeDateValue(r['Date of Birth'] || r['DOB']);
+            var dobMatched = (!rDob || !submittedDob || rDob === submittedDob);
+
+            if (phoneMatched && dobMatched) {
+              matchedRow = {
+                fullName: r['Full Name'] || '',
+                rollNumber: (r['Roll Number'] && r['Roll Number'] !== 'Unassigned') ? r['Roll Number'] : '',
+                registrationReference: r['Registration Reference Number'] || '',
+                phone: r['Phone Number'] || '',
+                selectedPlan: r['Selected Plan'] || r['Plan Name'] || '',
+                joiningDate: r['Joining Date'] || '',
+                registrationStatus: r['Registration Status'] || '',
+                emailAddress: r['Email Address'] || '',
+                registrationFee: parseFloat(r['Registration Fee']) || 100
+              };
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // A. If no matching record exists
+    if (!matchedRow) {
+      return createJsonResponse({
+        success: false,
+        code: 'DETAILS_MISMATCH',
+        message: 'Member details do not match. Please check the entered information.'
+      });
+    }
+
+    // B. Check Registration Status
+    var status = String(matchedRow.registrationStatus || '').trim().toLowerCase();
+
+    if (status === 'rejected') {
+      return createJsonResponse({
+        success: false,
+        code: 'REGISTRATION_REJECTED',
+        message: 'Your registration has been rejected. Please contact AB Gym before making a payment.'
+      });
+    }
+
+    if (
+      status === '' ||
+      status === 'pending' ||
+      status === 'pending approval' ||
+      status === 'pending verification' ||
+      status === 'submitted' ||
+      status === 'under review'
+    ) {
+      return createJsonResponse({
+        success: false,
+        code: 'REGISTRATION_PENDING',
+        message: 'Your registration has been received and is currently awaiting admin approval. The fee-payment facility will become available after your registration is approved. Please visit AB Gym reception or contact our team if you need assistance.'
+      });
+    }
+
+    if (
+      status === 'approved' ||
+      status === 'active' ||
+      status === 'successful'
+    ) {
+      var maskedPhone = matchedRow.phone ? ('******' + extractFirst4Digits(matchedRow.phone)) : 'N/A';
+      var memberObj = {
+        fullName: matchedRow.fullName,
+        rollNumber: matchedRow.rollNumber || '',
+        registrationReference: matchedRow.registrationReference,
+        registrationRef: matchedRow.registrationReference,
+        phone: matchedRow.phone,
+        phoneNumber: matchedRow.phone,
+        emailAddress: matchedRow.emailAddress,
+        selectedPlan: matchedRow.selectedPlan,
+        joiningDate: matchedRow.joiningDate,
+        membershipStatus: 'Approved',
+        registrationStatus: 'Approved',
+        maskedPhone: maskedPhone,
+        registrationFee: matchedRow.registrationFee
+      };
+
+      return createJsonResponse({
+        success: true,
+        code: 'MEMBER_VERIFIED',
+        message: 'Your registration has been approved.',
+        member: memberObj,
+        data: memberObj
+      });
+    }
+
+    // Unknown status default
     return createJsonResponse({
       success: false,
-      message: 'No registration or member record was found matching the entered reference.'
+      code: 'DETAILS_MISMATCH',
+      message: 'Member details do not match. Please check the entered information.'
     });
+
   } catch (err) {
     return createJsonResponse({
       success: false,
+      code: 'ERROR',
       message: 'Error verifying registration: ' + err.toString()
     });
   }
+}
+
+// 2b. Get Member Fee History
+function handleGetMemberFeeHistory(data) {
+  try {
+    var rollNumber = normalizeId(data.rollNumber || data.verifiedRollNumber || data.rollNo || '');
+    var regRef = normalizeId(data.registrationReferenceNumber || data.registrationRef || data.regRef || data.referenceOrRollNumber || '');
+
+    Logger.log("[getMemberFeeHistory] Normalized Roll: " + rollNumber);
+    Logger.log("[getMemberFeeHistory] Normalized RegRef: " + regRef);
+
+    if (!rollNumber && !regRef) {
+      return createJsonResponse({
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Roll Number or Registration Reference Number is required.'
+      });
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEETS.FEE_PAYMENTS);
+
+    if (!sheet) {
+      Logger.log("[getMemberFeeHistory] Fee Payments sheet not found!");
+      return createJsonResponse({
+        success: false,
+        code: 'FEE_HISTORY_ERROR',
+        message: 'Fee history is temporarily unavailable. Please try again.'
+      });
+    }
+
+    var dataValues = sheet.getDataRange().getValues();
+    Logger.log("[getMemberFeeHistory] Fee Payments row count: " + (dataValues ? dataValues.length : 0));
+
+    if (!dataValues || dataValues.length < 2) {
+      return createJsonResponse({
+        success: true,
+        code: 'NO_FEE_HISTORY',
+        history: [],
+        message: 'No previous fee payment records were found.'
+      });
+    }
+
+    var headerRow = dataValues[0];
+    var colMap = getFeePaymentsHeaderMap(headerRow);
+    Logger.log("[getMemberFeeHistory] Detected Fee Payments headers: " + JSON.stringify(colMap));
+
+    var matchedHistory = [];
+    var needsSheetUpdate = false;
+
+    for (var i = 1; i < dataValues.length; i++) {
+      var row = dataValues[i];
+
+      var rowRoll = colMap.rollNumber >= 0 ? normalizeId(row[colMap.rollNumber]) : '';
+      var rowRegRef = colMap.registrationReferenceNumber >= 0 ? normalizeId(row[colMap.registrationReferenceNumber]) : '';
+
+      var isMatched = false;
+      if (rollNumber !== '' && rowRoll !== '' && rowRoll === rollNumber) {
+        isMatched = true;
+      } else if (regRef !== '' && rowRegRef !== '' && rowRegRef === regRef) {
+        isMatched = true;
+      }
+
+      if (isMatched) {
+        if (rollNumber !== '' && (rowRoll === '' || rowRoll === 'UNASSIGNED') && colMap.rollNumber >= 0 && rowRegRef === regRef) {
+          try {
+            sheet.getRange(i + 1, colMap.rollNumber + 1).setValue(data.rollNumber || rollNumber);
+            row[colMap.rollNumber] = data.rollNumber || rollNumber;
+            needsSheetUpdate = true;
+          } catch (updateErr) {
+            Logger.log("[getMemberFeeHistory] Error updating roll number in row: " + updateErr.toString());
+          }
+        }
+
+        var feeRefNum = colMap.feeReferenceNumber >= 0 ? cleanString(row[colMap.feeReferenceNumber]) : '';
+        var regRefNum = colMap.registrationReferenceNumber >= 0 ? cleanString(row[colMap.registrationReferenceNumber]) : '';
+        var rowRollNum = colMap.rollNumber >= 0 ? cleanString(row[colMap.rollNumber]) : '';
+        var planName = colMap.plan >= 0 ? cleanString(row[colMap.plan]) : '';
+        var feeM = colMap.feeMonth >= 0 ? cleanString(row[colMap.feeMonth]) : '';
+        var feeAmt = colMap.amount >= 0 ? row[colMap.amount] : '';
+        var payMethod = colMap.paymentMethod >= 0 ? cleanString(row[colMap.paymentMethod]) : 'UPI';
+        var txnId = colMap.transactionId >= 0 ? cleanString(row[colMap.transactionId]) : '';
+        var payDate = colMap.paymentDate >= 0 ? formatDate(row[colMap.paymentDate]) : '';
+        var payStatus = colMap.paymentStatus >= 0 ? cleanString(row[colMap.paymentStatus]) : 'Pending Verification';
+        var receiptNum = colMap.receiptNumber >= 0 ? cleanString(row[colMap.receiptNumber]) : '';
+
+        if (!payStatus) payStatus = 'Pending Verification';
+
+        var item = {
+          feeReferenceNumber: feeRefNum,
+          registrationReferenceNumber: regRefNum,
+          rollNumber: rowRollNum || rollNumber,
+          plan: planName,
+          selectedPlan: planName,
+          feeMonth: feeM,
+          amount: String(feeAmt !== null && feeAmt !== undefined ? feeAmt : ''),
+          feeAmount: Number(feeAmt) || 0,
+          currentFeeAmount: Number(feeAmt) || 0,
+          amountPaid: Number(feeAmt) || 0,
+          paymentMethod: payMethod,
+          transactionId: txnId,
+          upiTransactionId: txnId,
+          paymentDate: payDate,
+          paymentStatus: payStatus,
+          status: payStatus,
+          receiptNumber: receiptNum
+        };
+
+        matchedHistory.push(item);
+      }
+    }
+
+    Logger.log("[getMemberFeeHistory] Number of matched records: " + matchedHistory.length);
+
+    if (needsSheetUpdate) {
+      SpreadsheetApp.flush();
+    }
+
+    matchedHistory.sort(function(a, b) {
+      var timeA = a.paymentDate ? new Date(a.paymentDate).getTime() : 0;
+      var timeB = b.paymentDate ? new Date(b.paymentDate).getTime() : 0;
+      if (isNaN(timeA)) timeA = 0;
+      if (isNaN(timeB)) timeB = 0;
+      return timeB - timeA;
+    });
+
+    if (matchedHistory.length === 0) {
+      return createJsonResponse({
+        success: true,
+        code: 'NO_FEE_HISTORY',
+        history: [],
+        message: 'No previous fee payment records were found.'
+      });
+    }
+
+    return createJsonResponse({
+      success: true,
+      code: 'FEE_HISTORY_FOUND',
+      history: matchedHistory,
+      records: matchedHistory,
+      data: matchedHistory
+    });
+
+  } catch (err) {
+    Logger.log("[getMemberFeeHistory Error] " + err.toString());
+    return createJsonResponse({
+      success: false,
+      code: 'FEE_HISTORY_ERROR',
+      message: 'Fee history is temporarily unavailable. Please try again.'
+    });
+  }
+}
+
+function getFeePaymentsHeaderMap(headerRow) {
+  var map = {
+    feeReferenceNumber: -1,
+    registrationReferenceNumber: -1,
+    rollNumber: -1,
+    fullName: -1,
+    plan: -1,
+    feeMonth: -1,
+    amount: -1,
+    paymentMethod: -1,
+    transactionId: -1,
+    paymentDate: -1,
+    paymentStatus: -1,
+    receiptNumber: -1
+  };
+
+  if (!headerRow || !headerRow.length) return map;
+
+  for (var i = 0; i < headerRow.length; i++) {
+    var h = String(headerRow[i] || "").trim().toLowerCase();
+
+    if (map.feeReferenceNumber === -1 && (h.indexOf('fee reference') !== -1 || h.indexOf('fee ref') !== -1 || h === 'ref no')) {
+      map.feeReferenceNumber = i;
+    } else if (map.registrationReferenceNumber === -1 && (h.indexOf('registration reference') !== -1 || h.indexOf('reg ref') !== -1 || h.indexOf('registration ref') !== -1)) {
+      map.registrationReferenceNumber = i;
+    } else if (map.rollNumber === -1 && (h.indexOf('roll number') !== -1 || h.indexOf('roll no') !== -1 || h === 'roll')) {
+      map.rollNumber = i;
+    } else if (map.fullName === -1 && (h.indexOf('member name') !== -1 || h.indexOf('full name') !== -1 || h === 'name')) {
+      map.fullName = i;
+    } else if (map.plan === -1 && (h.indexOf('selected plan') !== -1 || h.indexOf('plan') !== -1)) {
+      map.plan = i;
+    } else if (map.feeMonth === -1 && (h.indexOf('fee month') !== -1 || h.indexOf('month') !== -1)) {
+      map.feeMonth = i;
+    } else if (map.amount === -1 && (h.indexOf('current fee amount') !== -1 || h.indexOf('final amount') !== -1 || h.indexOf('total payable amount') !== -1 || h.indexOf('fee amount') !== -1 || h.indexOf('amount paid') !== -1 || h === 'amount')) {
+      map.amount = i;
+    } else if (map.paymentMethod === -1 && (h.indexOf('payment method') !== -1 || h.indexOf('payment mode') !== -1 || h === 'mode')) {
+      map.paymentMethod = i;
+    } else if (map.transactionId === -1 && (h.indexOf('transaction id') !== -1 || h.indexOf('upi transaction') !== -1 || h.indexOf('txn id') !== -1)) {
+      map.transactionId = i;
+    } else if (map.paymentDate === -1 && (h.indexOf('payment date') !== -1 || h === 'date' || h === 'timestamp' || h.indexOf('created date') !== -1)) {
+      map.paymentDate = i;
+    } else if (map.paymentStatus === -1 && (h.indexOf('payment status') !== -1 || h === 'status')) {
+      map.paymentStatus = i;
+    } else if (map.receiptNumber === -1 && (h.indexOf('receipt number') !== -1 || h.indexOf('receipt no') !== -1)) {
+      map.receiptNumber = i;
+    }
+  }
+
+  return map;
 }
 
 // 3. Submit Fee Payment
@@ -423,52 +775,8 @@ function handleSubmitFee(data) {
     var feeRef = generateFeeRef(now);
 
     var regRef = cleanString(data.registrationRef || data.registrationReferenceNumber || data.referenceOrRollNumber);
-    var rollNumber = cleanString(data.rollNumber) || 'Unassigned';
-    var memberName = cleanString(data.memberName || data.fullName);
-    var phone = cleanString(data.memberPhone || data.phone || data.phoneFirst4);
-
-    var memberEmail = cleanString(data.memberEmail || data.email || data.emailAddress);
-
-    // If email wasn't passed directly, attempt lookup in Registrations or Members sheet
-    if (!memberEmail && (regRef || rollNumber)) {
-      try {
-        var queryVal = (regRef || rollNumber).toUpperCase();
-        var regSh = ss.getSheetByName(SHEETS.REGISTRATIONS);
-        if (regSh && regSh.getLastRow() > 1) {
-          var rData = regSh.getDataRange().getValues();
-          var rHdrs = rData[0];
-          var rRefIdx = rHdrs.indexOf('Registration Reference Number');
-          var rEmailIdx = rHdrs.indexOf('Email Address');
-          if (rRefIdx !== -1 && rEmailIdx !== -1) {
-            for (var k = 1; k < rData.length; k++) {
-              if (cleanString(rData[k][rRefIdx]).toUpperCase() === queryVal) {
-                memberEmail = cleanString(rData[k][rEmailIdx]);
-                break;
-              }
-            }
-          }
-        }
-        if (!memberEmail) {
-          var mSh = ss.getSheetByName(SHEETS.MEMBERS);
-          if (mSh && mSh.getLastRow() > 1) {
-            var mData = mSh.getDataRange().getValues();
-            var mHdrs = mData[0];
-            var mRollIdx = mHdrs.indexOf('Roll Number');
-            var mEmailIdx = mHdrs.indexOf('Email Address');
-            if (mRollIdx !== -1 && mEmailIdx !== -1) {
-              for (var k = 1; k < mData.length; k++) {
-                if (cleanString(mData[k][mRollIdx]).toUpperCase() === queryVal) {
-                  memberEmail = cleanString(mData[k][mEmailIdx]);
-                  break;
-                }
-              }
-            }
-          }
-        }
-      } catch (e) {
-        // ignore lookup error
-      }
-    }
+    var rollNumber = cleanString(data.rollNumber);
+    if (rollNumber === 'Unassigned' || rollNumber === 'UNASSIGNED') rollNumber = '';
 
     if (!regRef && !rollNumber) {
       return createJsonResponse({
@@ -477,28 +785,151 @@ function handleSubmitFee(data) {
       });
     }
 
+    var memberName = cleanString(data.memberName || data.fullName);
+    var phone = cleanString(data.memberPhone || data.phone || data.phoneNumber);
+    var memberEmail = cleanString(data.memberEmail || data.email || data.emailAddress);
+    var selectedPlan = cleanString(data.selectedPlan || data.planName);
+    var amountPaid = parseFloat(data.amountPaid || data.totalPaid || data.currentFeeAmount) || 100;
+    var registrationStatus = 'Pending Approval';
+    var isPendingReg = true;
+
+    // Backend verification against Registrations / Members sheets
+    var queryVal = (regRef || rollNumber).toUpperCase();
+
+    // First search Members
+    var memSh = ss.getSheetByName(SHEETS.MEMBERS);
+    if (memSh && memSh.getLastRow() > 1) {
+      var mData = memSh.getDataRange().getValues();
+      var mHdrs = mData[0];
+      var mRollIdx = mHdrs.indexOf('Roll Number');
+      var mRefIdx = mHdrs.indexOf('Registration Reference Number');
+      var mNameIdx = mHdrs.indexOf('Full Name');
+      var mPhoneIdx = mHdrs.indexOf('Phone Number');
+      var mEmailIdx = mHdrs.indexOf('Email Address');
+      var mPlanIdx = mHdrs.indexOf('Selected Plan');
+
+      for (var k = 1; k < mData.length; k++) {
+        var rowM = mData[k];
+        var rRoll = cleanString(rowM[mRollIdx]).toUpperCase();
+        var rRef = cleanString(rowM[mRefIdx]).toUpperCase();
+
+        if ((queryVal && rRoll === queryVal) || (queryVal && rRef === queryVal)) {
+          if (mNameIdx !== -1 && rowM[mNameIdx]) memberName = cleanString(rowM[mNameIdx]);
+          if (mPhoneIdx !== -1 && rowM[mPhoneIdx]) phone = cleanString(rowM[mPhoneIdx]);
+          if (mEmailIdx !== -1 && rowM[mEmailIdx]) memberEmail = cleanString(rowM[mEmailIdx]);
+          if (mPlanIdx !== -1 && rowM[mPlanIdx]) selectedPlan = cleanString(rowM[mPlanIdx]);
+          if (!rollNumber && rRoll) rollNumber = rRoll;
+          if (!regRef && rRef) regRef = rRef;
+          registrationStatus = 'Approved';
+          isPendingReg = false;
+          break;
+        }
+      }
+    }
+
+    // If not found in Members, search Registrations
+    if (isPendingReg) {
+      var regSh = ss.getSheetByName(SHEETS.REGISTRATIONS);
+      if (regSh && regSh.getLastRow() > 1) {
+        var rData = regSh.getDataRange().getValues();
+        var rHdrs = rData[0];
+        var rRefIdx = rHdrs.indexOf('Registration Reference Number');
+        var rRollIdx = rHdrs.indexOf('Roll Number');
+        var rNameIdx = rHdrs.indexOf('Full Name');
+        var rPhoneIdx = rHdrs.indexOf('Phone Number');
+        var rEmailIdx = rHdrs.indexOf('Email Address');
+        var rPlanIdx = rHdrs.indexOf('Selected Plan');
+        var rStatIdx = rHdrs.indexOf('Registration Status');
+
+        for (var k = 1; k < rData.length; k++) {
+          var rowR = rData[k];
+          var rRef = cleanString(rowR[rRefIdx]).toUpperCase();
+          var rRoll = cleanString(rowR[rRollIdx]).toUpperCase();
+
+          if ((queryVal && rRef === queryVal) || (queryVal && rRoll === queryVal && rRoll !== 'UNASSIGNED')) {
+            var curStatus = cleanString(rowR[rStatIdx]).toLowerCase();
+            if (curStatus === 'rejected') {
+              return createJsonResponse({
+                success: false,
+                message: 'Your registration has been rejected. Please contact AB Gym before making a payment.'
+              });
+            }
+
+            if (rNameIdx !== -1 && rowR[rNameIdx]) memberName = cleanString(rowR[rNameIdx]);
+            if (rPhoneIdx !== -1 && rowR[rPhoneIdx]) phone = cleanString(rowR[rPhoneIdx]);
+            if (rEmailIdx !== -1 && rowR[rEmailIdx]) memberEmail = cleanString(rowR[rEmailIdx]);
+            if (rPlanIdx !== -1 && rowR[rPlanIdx]) selectedPlan = cleanString(rowR[rPlanIdx]);
+            if (!regRef && rRef) regRef = rRef;
+
+            if (curStatus === 'approved') {
+              registrationStatus = 'Approved';
+              isPendingReg = false;
+            } else {
+              registrationStatus = 'Pending Approval';
+              isPendingReg = true;
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    // Duplicate submission check (Requirement 9)
+    if (feeSheet && feeSheet.getLastRow() > 1) {
+      var fData = feeSheet.getDataRange().getValues();
+      var fHdrs = fData[0];
+      var fRegRefIdx = fHdrs.indexOf('Registration Reference Number');
+      var fRollIdx = fHdrs.indexOf('Roll Number');
+      var fPlanIdx = fHdrs.indexOf('Selected Plan');
+      var fAmtIdx = fHdrs.indexOf('Amount Paid');
+      var fStatIdx = fHdrs.indexOf('Payment Status');
+
+      for (var f = 1; f < fData.length; f++) {
+        var fRow = fData[f];
+        var fRef = cleanString(fRow[fRegRefIdx]).toUpperCase();
+        var fRoll = cleanString(fRow[fRollIdx]).toUpperCase();
+        var fStat = cleanString(fRow[fStatIdx]).toLowerCase();
+
+        var isSameRef = (regRef && fRef === regRef.toUpperCase()) || (rollNumber && fRoll === rollNumber.toUpperCase());
+        if (isSameRef && fStat !== 'rejected') {
+          var fPlan = cleanString(fRow[fPlanIdx]);
+          var fAmt = parseFloat(fRow[fAmtIdx]) || 0;
+
+          if ((selectedPlan && fPlan && fPlan.toLowerCase() === selectedPlan.toLowerCase()) || (Math.abs(fAmt - amountPaid) < 1)) {
+            return createJsonResponse({
+              success: false,
+              code: 'DUPLICATE_PAYMENT',
+              message: 'A fee submission for this registration and period already exists.'
+            });
+          }
+        }
+      }
+    }
+
+    var entrySource = isPendingReg ? 'Pre-Approval Fee Payment' : 'Member Fee Payment';
+
     var row = [
       formatDate(now), // Timestamp
       feeRef, // Fee Reference Number
       regRef, // Registration Reference Number
-      rollNumber,
+      rollNumber || '', // Roll Number
       memberName,
       phone,
       memberEmail,
-      cleanString(data.selectedPlan),
+      selectedPlan,
       data.previousBalance || 0,
-      data.amountPaid || 100,
-      data.amountPaid || 100, // Total Payable Amount
+      amountPaid,
+      amountPaid, // Total Payable Amount
       formatDateShort(now), // Payment Date
       cleanString(data.paymentMethod) || 'UPI',
-      cleanString(data.upiTxnId) || '',
-      cleanString(data.upiScreenshotUrl) || '',
+      cleanString(data.upiTxnId || data.upiTransactionId) || '',
+      cleanString(data.upiScreenshotUrl || data.paymentScreenshot) || '',
       'Pending Verification', // Payment Status
-      'Pending Verification', // Registration Status
+      registrationStatus, // Registration Status
       '', // Receipt Number
       '', // PDF Receipt Link
-      'Website', // Entry Source
-      cleanString(data.remarks) || '',
+      entrySource, // Entry Source
+      cleanString(data.remarks || data.notes) || '',
       '', // Verified By
       '', // Verified Date
       '' // Rejection Reason
@@ -856,6 +1287,28 @@ function handleUpdateRegistrationStatus(data) {
       ];
 
       memSheet.appendRow(memRow);
+
+      // Link any existing Fee Payments records (by Registration Reference Number) to newly assigned Roll Number
+      var feeSheet = ss.getSheetByName(SHEETS.FEE_PAYMENTS);
+      if (feeSheet && feeSheet.getLastRow() > 1) {
+        var fData = feeSheet.getDataRange().getValues();
+        var fHdrs = fData[0];
+        var fRegRefIdx = fHdrs.indexOf('Registration Reference Number');
+        var fRollIdx = fHdrs.indexOf('Roll Number');
+        var fRegStatIdx = fHdrs.indexOf('Registration Status');
+
+        if (fRegRefIdx !== -1 && fRollIdx !== -1) {
+          for (var f = 1; f < fData.length; f++) {
+            var fRef = cleanString(fData[f][fRegRefIdx]).toUpperCase();
+            if (fRef === regRef.toUpperCase()) {
+              feeSheet.getRange(f + 1, fRollIdx + 1).setValue(rollNumber);
+              if (fRegStatIdx !== -1) {
+                feeSheet.getRange(f + 1, fRegStatIdx + 1).setValue('Approved');
+              }
+            }
+          }
+        }
+      }
 
       logActivity(adminName, 'Approved Registration', 'Registration', regRef, 'Pending Verification', 'Approved', 'Assigned Roll Number: ' + rollNumber);
 

@@ -331,12 +331,9 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ initialPlanId, onNav
         origin: { y: 0.6 },
       });
 
-      // Redirect to /registration-success page
-      onNavigate('/registration-success', {
+      // Redirect user automatically to /pay-fee?registrationRef={{Registration Reference Number}}
+      onNavigate('/pay-fee', {
         registrationRef: regRef,
-        fullName: payload.fullName,
-        selectedPlan: payload.selectedPlan,
-        status: 'Pending Verification',
       });
     } catch (err: any) {
       setIsSubmitting(false);

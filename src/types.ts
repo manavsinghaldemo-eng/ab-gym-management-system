@@ -156,6 +156,10 @@ export interface FeePaymentRecord {
   remainingBalance?: number;
   paymentType?: 'Full Payment' | 'Partial Payment' | string;
   newExpiryDate?: string;
+  createdDate?: string;
+  createdAt?: string;
+  feeMonth?: string;
+  feePeriod?: string;
 }
 
 export interface MembershipPlan {
@@ -198,6 +202,7 @@ export interface GymSettings {
   altPhone: string;
   email: string;
   address: string;
+  googleMapsUrl?: string;
   upiId: string;
   upiName: string;
   qrCodeUrl?: string;

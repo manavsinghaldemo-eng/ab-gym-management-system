@@ -38,6 +38,7 @@ import {
   Calendar,
   Check,
   Eye,
+  X,
   EyeOff,
   RefreshCw,
   Copy,
@@ -2422,14 +2423,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               {/* Filters */}
               <div className="flex items-center gap-2">
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3" />
+                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
                   <input
                     type="text"
                     value={regSearch}
                     onChange={(e) => setRegSearch(e.target.value)}
                     placeholder="Search Ref, Name, Phone..."
-                    className="pl-9 pr-3 py-2 bg-[#0F0F12] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500"
+                    className="pl-9 pr-8 py-2 bg-[#0F0F12] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-all"
                   />
+                  {regSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setRegSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-0.5"
+                      title="Clear search"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
 
                 <select
@@ -2489,6 +2500,57 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                         const screenshotVal = reg.paymentScreenshot || reg.upiScreenshotUrl;
                         const txnVal = reg.upiTransactionId || reg.upiTxnId;
 
+                        const linkedFee = feePayments.find(p => {
+                          const pRef = (p.registrationRef || p.registrationReferenceNumber || '').trim().toUpperCase();
+                          const pRoll = (p.rollNumber || '').trim().toUpperCase();
+                          return (
+                            (refNum && pRef === refNum.trim().toUpperCase()) ||
+                            (rollVal && rollVal !== 'Unassigned' && pRoll === rollVal.trim().toUpperCase())
+                          );
+                        });
+
+                        let feeBadge = null;
+                        if (linkedFee) {
+                          const pStat = (linkedFee.paymentStatus || '').toLowerCase();
+                          if (pStat === 'approved' || pStat === 'verified' || pStat === 'successful') {
+                            feeBadge = (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                Fee Verified
+                              </span>
+                            );
+                          } else if (pStat === 'rejected') {
+                            feeBadge = (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                                Payment Rejected
+                              </span>
+                            );
+                          } else {
+                            feeBadge = (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
+                                Fee Submitted – Pending Verification
+                              </span>
+                            );
+                          }
+                        } else if ((reg.paymentStatus || '').toLowerCase() === 'successful') {
+                          feeBadge = (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                              Fee Verified
+                            </span>
+                          );
+                        } else if ((reg.paymentStatus || '').toLowerCase() === 'pending verification') {
+                          feeBadge = (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
+                              Fee Submitted – Pending Verification
+                            </span>
+                          );
+                        } else {
+                          feeBadge = (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-zinc-800 text-zinc-400 border border-zinc-700">
+                              Fee Not Submitted
+                            </span>
+                          );
+                        }
+
                         return (
                           <tr key={reg.id || refNum} className="hover:bg-zinc-800/30 transition-colors">
                             <td className="py-3.5 px-4 font-bold text-red-400 whitespace-nowrap">
@@ -2523,20 +2585,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                               {planVal || 'Standard'}
                             </td>
                             <td className="py-3.5 px-4 font-sans">
-                              <div className="font-bold text-emerald-400 font-mono">₹{reg.registrationFee}</div>
+                              <div className="mb-1">{feeBadge}</div>
+                              <div className="text-xs font-bold text-emerald-400 font-mono mt-1">₹{linkedFee?.amountPaid || reg.registrationFee || 100}</div>
                               <div className="text-[10px] text-zinc-400 uppercase font-mono">
-                                {reg.paymentMethod || 'UPI'} {txnVal ? `(${txnVal})` : ''}
+                                {linkedFee?.paymentMethod || reg.paymentMethod || 'UPI'} {(linkedFee?.upiTxnId || txnVal) ? `(${linkedFee?.upiTxnId || txnVal})` : ''}
                               </div>
-                              {reg.paymentStatus && (
-                                <div className="text-[10px] text-zinc-500 uppercase font-mono">
-                                  Payment: {reg.paymentStatus}
-                                </div>
-                              )}
                             </td>
                             <td className="py-3.5 px-4">
-                              {screenshotVal ? (
+                              {(linkedFee?.paymentScreenshot || screenshotVal) ? (
                                 <button
-                                  onClick={() => setScreenshotModalUrl(screenshotVal)}
+                                  onClick={() => setScreenshotModalUrl(linkedFee?.paymentScreenshot || screenshotVal)}
                                   className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded text-[11px] font-sans font-semibold flex items-center gap-1 cursor-pointer"
                                 >
                                   <Eye className="w-3.5 h-3.5 text-blue-400" />
@@ -2564,7 +2622,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                               </motion.span>
                             </td>
                             <td className="py-3.5 px-4 text-right">
-                              <div className="flex items-center justify-end gap-2 font-sans">
+                              <div className="flex items-center justify-end gap-2 font-sans flex-wrap">
                                 <button
                                   onClick={() => setViewRegModal(reg)}
                                   className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
@@ -2573,6 +2631,29 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                                   <Eye className="w-3.5 h-3.5" />
                                   <span>View Details</span>
                                 </button>
+
+                                {linkedFee && (linkedFee.paymentStatus === 'Pending Verification' || linkedFee.paymentStatus === 'Pending' || linkedFee.paymentStatus === 'Submitted') && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleApproveFeePayment(linkedFee)}
+                                      className="px-2 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                      title="Verify Fee Payment"
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                      <span>Verify Fee</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setRejectFeeModal(linkedFee)}
+                                      className="px-2 py-1.5 bg-red-900/80 hover:bg-red-800 text-red-200 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                      title="Reject Fee Payment"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                      <span>Reject Fee</span>
+                                    </button>
+                                  </>
+                                )}
 
                                 {!isStatusApproved(statusVal) && (
                                   <motion.button
@@ -2653,14 +2734,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               {/* Filters */}
               <div className="flex items-center gap-2">
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3" />
+                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
                   <input
                     type="text"
                     value={memberSearch}
                     onChange={(e) => setMemberSearch(e.target.value)}
                     placeholder="Search Roll, Name, Phone..."
-                    className="pl-9 pr-3 py-2 bg-[#0F0F12] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                    className="pl-9 pr-8 py-2 bg-[#0F0F12] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition-all"
                   />
+                  {memberSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setMemberSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-0.5"
+                      title="Clear search"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
 
                 <select
@@ -2802,14 +2893,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 </button>
 
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3" />
+                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
                   <input
                     type="text"
                     value={feeSearch}
                     onChange={(e) => setFeeSearch(e.target.value)}
                     placeholder="Search Fee Ref, Reg Ref, Roll, Name..."
-                    className="pl-9 pr-3 py-2 bg-[#0F0F12] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                    className="pl-9 pr-8 py-2 bg-[#0F0F12] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition-all"
                   />
+                  {feeSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setFeeSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-0.5"
+                      title="Clear search"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
 
                 <select
@@ -3560,29 +3661,60 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   1. Roll Number or Registration Reference *
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    value={addFeeForm.referenceOrRollNumber || ''}
-                    onChange={(e) => setAddFeeForm({ ...addFeeForm, referenceOrRollNumber: e.target.value })}
-                    placeholder="Enter Roll Number or Reg Ref (e.g., ABG-101 or REG-...)"
-                    className="flex-1 bg-[#141419] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 font-mono"
-                    required
-                  />
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={addFeeForm.referenceOrRollNumber || ''}
+                      onChange={(e) => {
+                        setAddFeeForm({ ...addFeeForm, referenceOrRollNumber: e.target.value });
+                        if (searchMemberError) setSearchMemberError('');
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSearchMemberForFee();
+                        }
+                      }}
+                      placeholder="Enter Roll Number or Reg Ref (e.g., ABG-101 or REG-...)"
+                      className="w-full bg-[#141419] border border-zinc-800 rounded-xl pl-3.5 pr-8 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 font-mono transition-all"
+                      required
+                    />
+                    {addFeeForm.referenceOrRollNumber && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAddFeeForm({
+                            ...addFeeForm,
+                            referenceOrRollNumber: '',
+                            fullName: '',
+                            phoneNumber: '',
+                            emailAddress: '',
+                            selectedPlan: '',
+                          });
+                          if (searchMemberError) setSearchMemberError('');
+                        }}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-0.5"
+                        title="Clear input"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={handleSearchMemberForFee}
                     disabled={isSearchingMember || !addFeeForm.referenceOrRollNumber.trim()}
-                    className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer shadow-md shadow-emerald-600/20 active:scale-95"
                   >
                     {isSearchingMember ? (
                       <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" />
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
                         <span>Searching...</span>
                       </>
                     ) : (
                       <>
-                        <Search className="w-3.5 h-3.5 text-emerald-500" />
-                        <span>2. Search Member</span>
+                        <Search className="w-3.5 h-3.5 text-white" />
+                        <span>Search Member</span>
                       </>
                     )}
                   </button>

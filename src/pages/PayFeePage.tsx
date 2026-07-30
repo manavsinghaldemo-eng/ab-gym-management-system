@@ -3,10 +3,11 @@ import {
   getStoredSettings,
   getStoredPlans,
   getStoredPayments,
+  getMemberForFee,
   MemberFeeDetailsData,
 } from '../lib/storage';
 import { AB_FITNESS_UPI_ID } from '../data/initialData';
-import { apiService, getScriptUrl, GOOGLE_APPS_SCRIPT_URL } from '../lib/api';
+import { api, apiService, getScriptUrl, GOOGLE_APPS_SCRIPT_URL } from '../lib/api';
 import { PaymentMethod, FeePaymentRecord } from '../types';
 import { ReceiptModal } from '../components/ReceiptModal';
 import { downloadFeeReceiptPDF } from '../lib/pdf';
@@ -15,6 +16,10 @@ import {
   Search,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  Clock,
+  Phone,
+  MapPin,
   QrCode,
   Copy,
   Check,
@@ -30,8 +35,8 @@ import {
   UserX,
   Smartphone,
   Info,
-  AlertTriangle,
   Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 
 interface PayFeePageProps {
@@ -73,6 +78,12 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
   // Status States
   const [isVerifying, setIsVerifying] = useState(false);
   const [searchError, setSearchError] = useState('');
+  const [statusAlert, setStatusAlert] = useState<{
+    code: string;
+    type: 'pending' | 'rejected' | 'mismatch';
+    message: string;
+  } | null>(null);
+  const [statusNotice, setStatusNotice] = useState<string>('');
   const [verifySuccessMsg, setVerifySuccessMsg] = useState('');
 
   // Form Fields
@@ -102,6 +113,7 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
   // Fee History & Receipt Modal State
   const [feeHistoryRecords, setFeeHistoryRecords] = useState<FeePaymentRecord[]>([]);
   const [historyError, setHistoryError] = useState<string>('');
+  const [isLoadingFeeHistory, setIsLoadingFeeHistory] = useState<boolean>(false);
   const [selectedReceiptRecord, setSelectedReceiptRecord] = useState<FeePaymentRecord | null>(null);
 
   // Submission State
@@ -136,23 +148,36 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
     setOfferValidUntil('');
     setIsSpecialOfferActive(false);
     setVerifySuccessMsg('');
+    setStatusNotice('');
     setSearchError('');
+    setStatusAlert(null);
     setSubmitError('');
     setUpiClicked(false);
     setNoUpiAppFound(false);
   };
 
-  // Input change handlers (clears verified state if user modifies input after verification)
+  // Input change handlers (clears errors and status alerts when input changes)
   const handleRefInputChange = (value: string) => {
     const uppercaseVal = value.toUpperCase().replace(/\s+/g, '');
     setReferenceOrRollNumber(uppercaseVal);
     if (searchError) setSearchError('');
+    if (statusAlert) setStatusAlert(null);
+    if (verifiedRecord) handleResetVerification();
   };
 
   const handlePhoneFirst4Change = (value: string) => {
     const digitsOnly = value.replace(/\D/g, '').slice(0, 4);
     setPhoneFirst4(digitsOnly);
     if (searchError) setSearchError('');
+    if (statusAlert) setStatusAlert(null);
+    if (verifiedRecord) handleResetVerification();
+  };
+
+  const handleDobChange = (value: string) => {
+    setDateOfBirth(value);
+    if (searchError) setSearchError('');
+    if (statusAlert) setStatusAlert(null);
+    if (verifiedRecord) handleResetVerification();
   };
 
   // Cleanup inputs for search
@@ -165,15 +190,94 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
     !dateOfBirth ||
     isVerifying;
 
+  const fetchFeeHistory = async (targetRoll: string, targetRegRef: string) => {
+    setIsLoadingFeeHistory(true);
+    setHistoryError('');
+
+    try {
+      const res = await api.getMemberFeeHistory({
+        rollNumber: targetRoll,
+        registrationReferenceNumber: targetRegRef,
+        registrationRef: targetRegRef,
+        referenceOrRollNumber: targetRoll || targetRegRef,
+        phoneFirst4: verifiedPhoneFirst4 || phoneFirst4 || cleanPhone,
+        dateOfBirth: verifiedCredentials.dateOfBirth || dateOfBirth,
+      });
+
+      console.log("AB GYM BACKEND getMemberFeeHistory response:", res);
+
+      if (res && res.success === false) {
+        setHistoryError(res.message || "Fee history is temporarily unavailable. Please try again.");
+        setFeeHistoryRecords([]);
+      } else if (res) {
+        const resAny = res as any;
+        const rawHistory =
+          resAny.history ||
+          resAny.records ||
+          resAny.data?.records ||
+          resAny.data ||
+          [];
+
+        const fetchedList: FeePaymentRecord[] = Array.isArray(rawHistory) ? rawHistory : [];
+
+        // Merge local storage payments matching targetRoll or targetRegRef
+        const localPayments = getStoredPayments();
+        const mRoll = (targetRoll || '').trim().toUpperCase();
+        const mReg = (targetRegRef || '').trim().toUpperCase();
+
+        const matchedLocal = localPayments.filter((p) => {
+          const pRoll = (p.rollNumber || '').trim().toUpperCase();
+          const pReg = (p.registrationRef || p.registrationReferenceNumber || '').trim().toUpperCase();
+          return (
+            (pRoll !== '' && mRoll !== '' && pRoll === mRoll) ||
+            (pReg !== '' && mReg !== '' && pReg === mReg)
+          );
+        });
+
+        const mergedMap = new Map<string, FeePaymentRecord>();
+        fetchedList.forEach((item) => {
+          const key = item.feeReferenceNumber || item.id || Math.random().toString();
+          mergedMap.set(key, item);
+        });
+        matchedLocal.forEach((item) => {
+          const key = item.feeReferenceNumber || item.id || Math.random().toString();
+          if (!mergedMap.has(key)) {
+            mergedMap.set(key, item);
+          }
+        });
+
+        const sortedHistory = Array.from(mergedMap.values()).sort((a, b) => {
+          const dateA = new Date(a.paymentDate || a.createdDate || a.timestamp || 0).getTime();
+          const dateB = new Date(b.paymentDate || b.createdDate || b.timestamp || 0).getTime();
+          return dateB - dateA;
+        });
+
+        setFeeHistoryRecords(sortedHistory);
+      }
+    } catch (err: any) {
+      console.error("Error executing getMemberFeeHistory:", err);
+      setHistoryError("Fee history is temporarily unavailable. Please try again.");
+      setFeeHistoryRecords([]);
+    } finally {
+      setIsLoadingFeeHistory(false);
+    }
+  };
+
   // Handle member/registration verification
   const handleVerifyAndFetchRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isVerifyDisabled) return;
 
     setSearchError('');
+    setStatusAlert(null);
     setVerifySuccessMsg('');
     setSubmitError('');
     setIsVerifying(true);
+
+    console.log("=== AB GYM VERIFICATION ATTEMPT ===");
+    console.log("Normalized Ref/Roll:", cleanRef);
+    console.log("Mobile First 4 Digits:", cleanPhone);
+    console.log("Date of Birth:", dateOfBirth);
 
     try {
       const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
@@ -184,7 +288,9 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
         body: JSON.stringify({
           action: 'getMemberForFee',
           referenceOrRollNumber: cleanRef,
+          phoneLast4: cleanPhone,
           phoneFirst4: cleanPhone,
+          mobileLast4: cleanPhone,
           dateOfBirth: dateOfBirth,
         }),
       });
@@ -197,20 +303,47 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
         throw new Error('Invalid server response: ' + rawText);
       }
 
-      console.log("AB GYM BACKEND:", result);
+      console.log("AB GYM BACKEND VERIFICATION RESULT:", result);
 
-      if (!result.success || (!result.data && !result.member && !result.record && !result.fullName && !result.rollNumber)) {
-        throw new Error(
-          result.message ||
-            result.error ||
-            'Verification failed. Member record not found.'
-        );
+      const code = result.code || (result.success ? 'MEMBER_VERIFIED' : 'DETAILS_MISMATCH');
+
+      if (code === 'REGISTRATION_PENDING') {
+        setIsVerifying(false);
+        setVerifiedRecord(null);
+        setStatusAlert({
+          code: 'REGISTRATION_PENDING',
+          type: 'pending',
+          message: result.message || 'Your registration has been received and is currently awaiting admin approval. The fee-payment facility will become available after your registration is approved. Please visit AB Gym reception or contact our team if you need assistance.',
+        });
+        return;
+      }
+
+      if (code === 'REGISTRATION_REJECTED') {
+        setIsVerifying(false);
+        setVerifiedRecord(null);
+        setStatusAlert({
+          code: 'REGISTRATION_REJECTED',
+          type: 'rejected',
+          message: result.message || 'Your registration has been rejected. Please contact AB Gym before making a payment.',
+        });
+        return;
+      }
+
+      if (!result.success || code === 'DETAILS_MISMATCH' || (!result.data && !result.member && !result.record && !result.fullName && !result.rollNumber && !result.registrationReferenceNumber)) {
+        setIsVerifying(false);
+        setVerifiedRecord(null);
+        setStatusAlert({
+          code: 'DETAILS_MISMATCH',
+          type: 'mismatch',
+          message: result.message || 'Member details do not match. Please check the entered information.',
+        });
+        return;
       }
 
       const fetchedData = (result.data || result.member || result.record || result) as MemberFeeDetailsData;
 
       setIsVerifying(false);
-      setVerifySuccessMsg(result.message || 'Member record verified successfully.');
+      setVerifySuccessMsg('Your registration has been approved.');
 
       const previousBalanceVal = Number(
         result.member?.previousBalance ??
@@ -354,109 +487,79 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
       setNotes('');
       setPaymentDate(new Date().toISOString().split('T')[0]);
 
-      // 2. Construct and log exact request sent to action: "getMemberPaymentHistory"
-      const historyPayload = {
-        action: "getMemberPaymentHistory",
-        rollNumber: exactRollNumber,
-        referenceOrRollNumber: cleanRef,
-        phoneFirst4: cleanPhone,
-        dateOfBirth: dateOfBirth,
-      };
-
-      console.log("Request sent to action 'getMemberPaymentHistory':", historyPayload);
-
-      // 3. Fetch from backend and log complete response
-      setHistoryError('');
-      let fetchedHistoryList: FeePaymentRecord[] = [];
-
+      // Fetch fee history using verified roll number and registration reference number
+      await fetchFeeHistory(exactRollNumber, regRef);
+    } catch (err: any) {
+      console.warn("GAS verification offline or error, trying local storage fallback:", err);
       try {
-        const historyResponse = await fetch(GOOGLE_APPS_SCRIPT_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'text/plain;charset=utf-8',
-          },
-          body: JSON.stringify(historyPayload),
+        const localRes = getMemberForFee({
+          referenceOrRollNumber: cleanRef,
+          phoneFirst4: cleanPhone,
+          dateOfBirth: dateOfBirth,
+        });
+        if (localRes.code === 'REGISTRATION_PENDING') {
+          setIsVerifying(false);
+          setVerifiedRecord(null);
+          setStatusAlert({
+            code: 'REGISTRATION_PENDING',
+            type: 'pending',
+            message: localRes.message || 'Your registration has been received and is currently awaiting admin approval. The fee-payment facility will become available after your registration is approved. Please visit AB Gym reception or contact our team if you need assistance.',
+          });
+          return;
+        }
+        if (localRes.code === 'REGISTRATION_REJECTED') {
+          setIsVerifying(false);
+          setVerifiedRecord(null);
+          setStatusAlert({
+            code: 'REGISTRATION_REJECTED',
+            type: 'rejected',
+            message: localRes.message || 'Your registration has been rejected. Please contact AB Gym before making a payment.',
+          });
+          return;
+        }
+        if (!localRes.success || localRes.code === 'DETAILS_MISMATCH' || !localRes.data) {
+          setIsVerifying(false);
+          setVerifiedRecord(null);
+          setStatusAlert({
+            code: 'DETAILS_MISMATCH',
+            type: 'mismatch',
+            message: localRes.message || 'Member details do not match. Please check the entered information.',
+          });
+          return;
+        }
+
+        const fetchedData = localRes.data;
+        setIsVerifying(false);
+        setVerifySuccessMsg('Your registration has been approved.');
+        setStatusAlert(null);
+        setVerifiedRecord(fetchedData);
+        setVerifiedRegistrationRef(fetchedData.registrationRef || cleanRef);
+        setVerifiedRollNumber(fetchedData.rollNumber || cleanRef);
+        setVerifiedPhoneFirst4(cleanPhone);
+        setVerifiedCredentials({
+          referenceOrRollNumber: referenceOrRollNumber.trim(),
+          phoneFirst4: phoneFirst4.trim(),
+          dateOfBirth: dateOfBirth,
         });
 
-        const rawHistoryText = await historyResponse.text();
-        let historyResult: any = null;
-        try {
-          historyResult = JSON.parse(rawHistoryText);
-        } catch {
-          historyResult = {
-            success: false,
-            message: "Non-JSON response for getMemberPaymentHistory: " + rawHistoryText,
-          };
-        }
+        const planName = fetchedData.selectedPlan || (plans[0]?.name || 'Standard Plan (3 Months)');
+        setSelectedPlan(planName);
+        const matchedPlan = plans.find((p) => p.name === planName);
+        const resolvedFee = matchedPlan ? matchedPlan.price : (Number(fetchedData.registrationFee) || 2499);
+        setCurrentFeeAmount(resolvedFee);
+        setPaymentType('Full Payment');
+        setAmountPaidInput('');
+        setPaymentMethod('UPI');
+        setPaymentDate(new Date().toISOString().split('T')[0]);
 
-        console.log("AB GYM BACKEND:", historyResult);
-        console.log("Complete backend response for getMemberPaymentHistory:", historyResult);
-
-        if (historyResult && (historyResult.success === false || historyResult.error)) {
-          const errMsg = historyResult.message || historyResult.error || "Backend error fetching payment history.";
-          setHistoryError(errMsg);
-        } else if (historyResult) {
-          const rawHistory =
-            historyResult.records ||
-            historyResult.data?.records ||
-            historyResult.data ||
-            historyResult.feeHistory ||
-            historyResult.feePayments ||
-            historyResult.history ||
-            result.feeHistory ||
-            result.feePayments ||
-            [];
-
-          if (Array.isArray(rawHistory)) {
-            fetchedHistoryList = rawHistory;
-          }
-        }
-      } catch (histErr: any) {
-        console.error("Error executing getMemberPaymentHistory:", histErr);
-        const errMsg = histErr?.message || String(histErr) || "Failed to fetch fee payment history.";
-        setHistoryError(errMsg);
-      }
-
-      // 4 & 5. Match using exact Roll Number and merge local records
-      const localPayments = getStoredPayments();
-      const matchedLocal = localPayments.filter((p) => {
-        const pRoll = (p.rollNumber || '').trim().toUpperCase();
-        const pReg = (p.registrationRef || p.registrationReferenceNumber || '').trim().toUpperCase();
-
-        const mRoll = exactRollNumber.toUpperCase();
-        const mReg = regRef.toUpperCase();
-
-        return (
-          (pRoll && mRoll && pRoll === mRoll) ||
-          (pReg && mReg && pReg === mReg)
+        await fetchFeeHistory(fetchedData.rollNumber || cleanRef, fetchedData.registrationRef || cleanRef);
+      } catch (fallbackErr) {
+        setIsVerifying(false);
+        handleResetVerification();
+        setSearchError(
+          err instanceof Error ? err.message : String(err)
         );
-      });
-
-      const mergedMap = new Map<string, FeePaymentRecord>();
-      fetchedHistoryList.forEach((item) => {
-        const key = item.feeReferenceNumber || item.id || Math.random().toString();
-        mergedMap.set(key, item);
-      });
-      matchedLocal.forEach((item) => {
-        const key = item.feeReferenceNumber || item.id || Math.random().toString();
-        if (!mergedMap.has(key)) {
-          mergedMap.set(key, item);
-        }
-      });
-
-      const sortedHistory = Array.from(mergedMap.values()).sort((a, b) => {
-        const dateA = new Date(a.paymentDate || a.timestamp || 0).getTime();
-        const dateB = new Date(b.paymentDate || b.timestamp || 0).getTime();
-        return dateB - dateA;
-      });
-
-      setFeeHistoryRecords(sortedHistory);
-    } catch (err: any) {
-      setIsVerifying(false);
-      handleResetVerification();
-      setSearchError(
-        err instanceof Error ? err.message : String(err)
-      );
+      }
     }
   };
 
@@ -563,7 +666,7 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
     }
 
     if (!phoneFirst4 || phoneFirst4.length !== 4) {
-      const errMsg = 'Enter the first 4 digits of the registered mobile number.';
+      const errMsg = 'Enter 4 digits of the registered mobile number.';
       setSubmitError(errMsg);
       return;
     }
@@ -782,7 +885,7 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                   maxLength={4}
                   value={phoneFirst4}
                   onChange={(e) => handlePhoneFirst4Change(e.target.value)}
-                  placeholder="e.g. 9876"
+                  placeholder="Enter first 4 digits"
                   className="w-full bg-black border border-white/20 focus:border-[#2563EB] text-white px-4 py-3.5 rounded-xl text-xs font-mono outline-none transition-colors"
                   required
                 />
@@ -799,7 +902,7 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                 <input
                   type="date"
                   value={dateOfBirth}
-                  onChange={(e) => setDateOfBirth(e.target.value)}
+                  onChange={(e) => handleDobChange(e.target.value)}
                   className="w-full bg-black border border-white/20 focus:border-[#2563EB] text-white px-4 py-3.5 rounded-xl text-xs font-mono outline-none transition-colors"
                   required
                 />
@@ -829,7 +932,72 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
           </button>
         </form>
 
-        {/* Error Alert */}
+        {/* Status Alerts (Pending / Rejected / Mismatch) */}
+        {statusAlert && statusAlert.type === 'pending' && (
+          <div className="bg-amber-950/40 border border-amber-500/50 p-6 sm:p-8 rounded-2xl space-y-4 text-amber-200 shadow-xl shadow-amber-950/20">
+            <div className="flex items-start gap-3.5">
+              <div className="p-2.5 bg-amber-500/20 border border-amber-500/40 rounded-xl shrink-0 mt-0.5">
+                <Clock className="w-6 h-6 text-amber-400" />
+              </div>
+              <div className="space-y-1.5 flex-1">
+                <h4 className="text-sm font-bold font-mono uppercase tracking-wider text-amber-300">
+                  REGISTRATION PENDING APPROVAL
+                </h4>
+                <p className="text-xs sm:text-sm font-sans leading-relaxed text-amber-100">
+                  {statusAlert.message || "Your registration has been received and is currently awaiting admin approval. The fee-payment facility will become available after your registration is approved. Please visit AB Gym reception or contact our team if you need assistance."}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-black/50 border border-amber-500/30 p-3 rounded-xl flex items-center gap-2.5 text-xs text-amber-300 font-medium">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Please do not make any payment until your registration is approved.</span>
+            </div>
+
+            <div className="pt-2 flex flex-wrap items-center gap-3">
+              {settings.phone && (
+                <a
+                  href={`tel:${settings.phone}`}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  <Phone className="w-4 h-4" />
+                  <span>Contact AB Gym</span>
+                </a>
+              )}
+              <a
+                href={settings.googleMapsUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${settings.gymName || 'AB Gym'}, ${settings.address || 'Sector 18, New Delhi'}`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-white/10 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                <MapPin className="w-4 h-4 text-amber-400" />
+                <span>Get Directions / Visit Gym</span>
+              </a>
+            </div>
+          </div>
+        )}
+
+        {statusAlert && statusAlert.type === 'rejected' && (
+          <div className="bg-red-950/40 border border-red-500/50 p-4 rounded-xl flex items-start gap-3 text-red-200">
+            <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-xs font-bold font-mono uppercase tracking-wider text-red-300">REGISTRATION REJECTED</h4>
+              <p className="text-xs font-sans mt-1 leading-relaxed">{statusAlert.message}</p>
+            </div>
+          </div>
+        )}
+
+        {statusAlert && statusAlert.type === 'mismatch' && (
+          <div className="bg-red-950/40 border border-red-500/50 p-4 rounded-xl flex items-start gap-3 text-red-200">
+            <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-xs font-bold font-mono uppercase tracking-wider text-red-300">MEMBER DETAILS MISMATCH</h4>
+              <p className="text-xs font-sans mt-1 leading-relaxed">{statusAlert.message}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Generic Error Alert */}
         {searchError && (
           <div className="bg-red-950/40 border border-red-500/40 p-4 rounded-xl flex items-start gap-3">
             <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
@@ -913,7 +1081,7 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                 </span>
               </div>
               <div>
-                <span className="text-zinc-500 block text-[11px]">Registered Mobile First 4:</span>
+                <span className="text-zinc-500 block text-[11px]">Registered Mobile Digits:</span>
                 <span className="font-bold text-zinc-300">{verifiedPhoneFirst4 || phoneFirst4}</span>
               </div>
               <div>
@@ -945,15 +1113,29 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
               </span>
             </div>
 
-            {historyError ? (
-              <div className="p-4 bg-red-950/80 border border-red-500/50 rounded-xl space-y-2">
+            {isLoadingFeeHistory ? (
+              <div className="p-6 space-y-3 animate-pulse bg-zinc-950/60 rounded-xl border border-zinc-800/80">
+                <div className="h-4 bg-zinc-800 rounded w-1/3"></div>
+                <div className="h-10 bg-zinc-900 rounded"></div>
+                <div className="h-10 bg-zinc-900 rounded"></div>
+              </div>
+            ) : historyError ? (
+              <div className="p-4 bg-red-950/80 border border-red-500/50 rounded-xl space-y-3">
                 <div className="flex items-center gap-2 text-red-400 font-bold text-xs font-mono uppercase">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>Backend Error Fetching Fee Payment History</span>
+                  <span>Fee history is temporarily unavailable. Please try again.</span>
                 </div>
-                <p className="text-xs text-red-200 font-mono break-words leading-relaxed">
+                <p className="text-xs text-red-200/80 font-sans leading-relaxed">
                   {historyError}
                 </p>
+                <button
+                  type="button"
+                  onClick={() => fetchFeeHistory(verifiedRollNumber, verifiedRegistrationRef)}
+                  className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Retry Fetching History</span>
+                </button>
               </div>
             ) : feeHistoryRecords.length === 0 ? (
               <div className="p-6 text-center bg-zinc-950 rounded-xl border border-zinc-800/80 space-y-2">
@@ -973,8 +1155,8 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                       <th className="py-3 px-3">Fee Ref #</th>
                       <th className="py-3 px-3">Payment Date</th>
                       <th className="py-3 px-3">Fee Month / Plan</th>
-                      <th className="py-3 px-3">Amount Paid</th>
-                      <th className="py-3 px-3">Remaining Balance</th>
+                      <th className="py-3 px-3">Amount & Mode</th>
+                      <th className="py-3 px-3">UPI Txn ID</th>
                       <th className="py-3 px-3">Status</th>
                       <th className="py-3 px-3 text-right">Receipt / Actions</th>
                     </tr>
@@ -987,11 +1169,19 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                       const amtPaid = rec.amountPaid ?? rec.currentFeeAmount ?? 0;
                       const remBal = rec.remainingBalance ?? 0;
                       const feeMonthDisplay = rec.feeMonth || rec.feePeriod || rec.selectedPlan || 'N/A';
+                      const payMethod = rec.paymentMethod || 'UPI';
+                      const upiTxn = rec.upiTransactionId || rec.transactionId || '';
+                      const receiptNo = rec.receiptNumber || '';
 
                       return (
                         <tr key={rec.id || rec.feeReferenceNumber} className="hover:bg-zinc-900/50 transition-colors">
                           <td className="py-3 px-3 font-bold text-blue-400">
-                            {rec.feeReferenceNumber || 'N/A'}
+                            <div>{rec.feeReferenceNumber || 'N/A'}</div>
+                            {receiptNo && receiptNo !== rec.feeReferenceNumber && (
+                              <span className="text-[10px] text-zinc-500 font-normal block">
+                                Receipt #{receiptNo}
+                              </span>
+                            )}
                           </td>
                           <td className="py-3 px-3 text-zinc-300">
                             {rec.paymentDate || 'N/A'}
@@ -1003,24 +1193,20 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                                 {rec.selectedPlan}
                               </span>
                             )}
-                            {rec.feePriceType && rec.feePriceType !== 'Regular Price' && (
-                              <span className="text-[9px] text-emerald-400 font-sans font-semibold block">
-                                {rec.feePriceType}
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3 px-3 font-bold text-emerald-400">
-                            ₹{Number(amtPaid).toLocaleString('en-IN')}
                           </td>
                           <td className="py-3 px-3">
-                            {remBal > 0 ? (
-                              <span className="font-bold text-amber-400">
-                                ₹{Number(remBal).toLocaleString('en-IN')}
-                              </span>
+                            <div className="font-bold text-emerald-400">
+                              ₹{Number(amtPaid).toLocaleString('en-IN')}
+                            </div>
+                            <span className="text-[10px] text-zinc-400 font-normal block">
+                              {payMethod}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-zinc-400 font-mono text-[11px]">
+                            {upiTxn ? (
+                              <span className="text-zinc-300">{upiTxn}</span>
                             ) : (
-                              <span className="text-zinc-500 font-normal">
-                                ₹0 (Paid in Full)
-                              </span>
+                              <span className="text-zinc-600">—</span>
                             )}
                           </td>
                           <td className="py-3 px-3">

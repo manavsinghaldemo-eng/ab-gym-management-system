@@ -389,8 +389,14 @@ export function calculateExpiryDate(startDateStr: string, durationMonths: number
 export interface GetMemberForFeeData {
   action?: string;
   registrationRefOrRoll?: string;
+  referenceOrRollNumber?: string;
   rollNumber?: string;
   mobileLast4?: string;
+  phoneLast4?: string;
+  phoneFirst4?: string;
+  phone?: string;
+  dateOfBirth?: string;
+  dob?: string;
 }
 
 export interface MemberFeeDetailsData {
@@ -425,136 +431,318 @@ export interface MemberFeeDetailsData {
   lastPaymentStatus: string;
   planId?: string;
   id?: string;
+  isPendingRegistration?: boolean;
 }
 
 export interface GetMemberForFeeResponse {
   success: boolean;
+  code?: string;
   message: string;
+  member?: any;
   data?: MemberFeeDetailsData;
+  statusNotice?: string;
+  statusNoticeType?: string;
+}
+
+export function normalizeDate(val: any): string {
+  if (!val) return '';
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return '';
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  let str = String(val).trim();
+  if (!str) return '';
+
+  if (str.includes('T')) {
+    str = str.split('T')[0];
+  }
+  if (str.includes(' ')) {
+    str = str.split(' ')[0];
+  }
+
+  str = str.replace(/\//g, '-');
+  const parts = str.split('-');
+  if (parts.length === 3) {
+    const p0 = parseInt(parts[0], 10);
+    const p1 = parseInt(parts[1], 10);
+    const p2 = parseInt(parts[2], 10);
+
+    if (!isNaN(p0) && !isNaN(p1) && !isNaN(p2)) {
+      if (parts[0].length === 4) {
+        const mm = String(p1).padStart(2, '0');
+        const dd = String(p2).padStart(2, '0');
+        return `${parts[0]}-${mm}-${dd}`;
+      }
+      if (parts[2].length === 4) {
+        const mm = String(p1).padStart(2, '0');
+        const dd = String(p0).padStart(2, '0');
+        return `${parts[2]}-${mm}-${dd}`;
+      }
+    }
+  }
+
+  try {
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const d = String(parsed.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  } catch (e) {}
+
+  return str;
+}
+
+export function extractFirst4Digits(phone: string | number | null | undefined): string {
+  const digits = String(phone || "").replace(/\D/g, "");
+  const tenDigitPhone = digits.length > 10 ? digits.slice(-10) : digits;
+  return tenDigitPhone.slice(0, 4);
 }
 
 /**
- * Fee Verification: Fetch record by Registration Reference Number or Roll Number + Mobile Last 4 digits
+ * Fee Verification: Fetch record by Registration Reference Number or Roll Number + Mobile First 4 digits
  */
 export function getMemberForFee(data: GetMemberForFeeData): GetMemberForFeeResponse {
-  const queryRef = String(data.registrationRefOrRoll || data.rollNumber || "").trim().toUpperCase();
-  const mobileLast4 = String(data.mobileLast4 || "").replace(/\D/g, "");
+  const rawRef = String(data.referenceOrRollNumber || data.registrationRefOrRoll || data.rollNumber || "").trim();
+  const queryRefClean = rawRef.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const submittedPhoneFirst4 = extractFirst4Digits(data.phoneFirst4 || data.phoneLast4 || data.mobileLast4 || data.phone);
+  const submittedDob = normalizeDate(data.dateOfBirth || data.dob);
 
-  if (!queryRef || !mobileLast4) {
+  if (!queryRefClean) {
     return {
       success: false,
-      message: "Registration Reference Number (or Roll Number) and registered mobile last 4 digits are required."
+      code: "DETAILS_MISMATCH",
+      message: "Member details do not match. Please check the entered information."
     };
   }
 
-  // Validate Mobile Last 4 digits format
-  if (!/^\d{4}$/.test(mobileLast4)) {
-    return {
-      success: false,
-      message: "Enter exactly 4 digits from your registered mobile number."
-    };
-  }
+  let matchedRecord: any = null;
+  let isFromMembers = false;
 
-  // 1. Search Registrations list
-  const regs = getStoredRegistrations();
-  const matchedReg = regs.find(
-    (r) =>
-      r.registrationRef.trim().toUpperCase() === queryRef ||
-      (r.rollNumber && r.rollNumber.trim().toUpperCase() === queryRef)
-  );
+  // 1. First search Members list
+  const members = getStoredMembers();
+  for (const m of members) {
+    const mRollClean = (m.rollNumber || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const mRefClean = (m.registrationRef || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-  if (matchedReg) {
-    const storedPhoneDigits = String(matchedReg.phone || "").replace(/\D/g, "");
-    const storedMobileLast4 = storedPhoneDigits.slice(-4);
+    const memRefMatched = (mRollClean && mRollClean === queryRefClean) || (mRefClean && mRefClean === queryRefClean);
+    if (memRefMatched) {
+      const mPhoneFirst4 = extractFirst4Digits(m.phone);
+      const mPhoneMatched = (!submittedPhoneFirst4 || !mPhoneFirst4 || submittedPhoneFirst4 === mPhoneFirst4);
 
-    if (storedMobileLast4 !== mobileLast4) {
-      return {
-        success: false,
-        message: "The mobile number verification failed. Please enter the correct last 4 digits of your registered mobile number."
-      };
+      const mDob = normalizeDate(m.dob || (m as any).dateOfBirth);
+      const mDobMatched = (!mDob || !submittedDob || mDob === submittedDob);
+
+      if (mPhoneMatched && mDobMatched) {
+        matchedRecord = {
+          registrationRef: m.registrationRef || "",
+          rollNumber: m.rollNumber,
+          fullName: m.fullName,
+          phone: m.phone || "",
+          emailAddress: m.email || "",
+          selectedPlan: m.planName || "",
+          joiningDate: m.joiningDate || "",
+          registrationStatus: 'Approved',
+          registrationFee: 100
+        };
+        isFromMembers = true;
+        break;
+      }
     }
+  }
 
-    const maskedPhone = `******${storedMobileLast4}`;
+  // 2. Fallback: Search Registrations list if not found in Members
+  if (!matchedRecord) {
+    const regs = getStoredRegistrations();
+    for (const r of regs) {
+      const rRefClean = (r.registrationRef || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const rRollClean = (r.rollNumber || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+      const refMatched = (rRefClean && rRefClean === queryRefClean) || (rRollClean && rRollClean === queryRefClean && rRollClean !== 'UNASSIGNED');
+      if (refMatched) {
+        const storedPhoneFirst4 = extractFirst4Digits(r.phone);
+        const phoneMatched = (!submittedPhoneFirst4 || !storedPhoneFirst4 || submittedPhoneFirst4 === storedPhoneFirst4);
+
+        const storedDob = normalizeDate(r.dob || (r as any).dateOfBirth);
+        const dobMatched = (!storedDob || !submittedDob || storedDob === submittedDob);
+
+        if (phoneMatched && dobMatched) {
+          matchedRecord = {
+            registrationRef: r.registrationRef,
+            rollNumber: r.rollNumber || "",
+            fullName: r.fullName,
+            phone: r.phone || "",
+            emailAddress: r.email || "",
+            selectedPlan: r.planName || "",
+            joiningDate: r.joiningDate || "",
+            registrationStatus: r.status,
+            registrationFee: r.registrationFee || 100
+          };
+          break;
+        }
+      }
+    }
+  }
+
+  // A. If no matching record exists
+  if (!matchedRecord) {
+    return {
+      success: false,
+      code: "DETAILS_MISMATCH",
+      message: "Member details do not match. Please check the entered information."
+    };
+  }
+
+  // B. Check Registration Status
+  const status = String(matchedRecord.registrationStatus || '').trim().toLowerCase();
+
+  if (status === 'rejected') {
+    return {
+      success: false,
+      code: "REGISTRATION_REJECTED",
+      message: "Your registration has been rejected. Please contact AB Gym before making a payment."
+    };
+  }
+
+  if (
+    status === '' ||
+    status === 'pending' ||
+    status === 'pending approval' ||
+    status === 'pending verification' ||
+    status === 'submitted' ||
+    status === 'under review'
+  ) {
+    return {
+      success: false,
+      code: "REGISTRATION_PENDING",
+      message: "Your registration has been received and is currently awaiting admin approval. The fee-payment facility will become available after your registration is approved. Please visit AB Gym reception or contact our team if you need assistance."
+    };
+  }
+
+  if (
+    status === 'approved' ||
+    status === 'active' ||
+    status === 'successful'
+  ) {
+    const maskedPhone = matchedRecord.phone ? (`******${extractFirst4Digits(matchedRecord.phone)}`) : 'N/A';
     const payments = getStoredPayments();
     const existingPayment = payments.find(
-      (p) => p.registrationRef === matchedReg.registrationRef || (matchedReg.rollNumber && p.rollNumber === matchedReg.rollNumber)
+      (p) => p.registrationRef === matchedRecord.registrationRef || (matchedRecord.rollNumber && p.rollNumber === matchedRecord.rollNumber)
     );
 
-    return {
-      success: true,
-      message: "Registration verified successfully.",
-      data: {
-        registrationRef: matchedReg.registrationRef,
-        rollNumber: matchedReg.rollNumber || "",
-        fullName: matchedReg.fullName,
-        maskedPhone: maskedPhone,
-        emailAddress: matchedReg.email || "",
-        selectedPlan: matchedReg.planName || "",
-        joiningDate: matchedReg.createdAt ? new Date(matchedReg.createdAt).toLocaleDateString() : matchedReg.joiningDate,
-        membershipStartDate: matchedReg.joiningDate || "",
-        membershipExpiryDate: calculateExpiryDate(matchedReg.joiningDate, 1),
-        registrationStatus: matchedReg.status,
-        memberStatus: matchedReg.status === 'Approved' ? 'Active' : 'Pending Approval',
-        paymentStatus: existingPayment ? existingPayment.status : 'Pending Verification',
-        registrationFee: matchedReg.registrationFee || 100,
-        previousBalance: 0,
-        lastPaymentDate: existingPayment ? existingPayment.paymentDate : 'None',
-        lastPaymentAmount: existingPayment ? existingPayment.amountPaid : 0,
-        lastPaymentStatus: existingPayment ? existingPayment.status : 'Pending Verification',
-        planId: matchedReg.planId,
-        id: matchedReg.id,
-      }
+    const feeData: MemberFeeDetailsData = {
+      registrationRef: matchedRecord.registrationRef,
+      rollNumber: matchedRecord.rollNumber || "",
+      fullName: matchedRecord.fullName,
+      maskedPhone: maskedPhone,
+      emailAddress: matchedRecord.emailAddress || "",
+      selectedPlan: matchedRecord.selectedPlan || "",
+      joiningDate: matchedRecord.joiningDate || "",
+      membershipStartDate: matchedRecord.joiningDate || "",
+      membershipExpiryDate: calculateExpiryDate(matchedRecord.joiningDate || new Date().toISOString(), 1),
+      registrationStatus: 'Approved',
+      memberStatus: 'Approved',
+      paymentStatus: existingPayment ? existingPayment.status : 'Pending',
+      registrationFee: matchedRecord.registrationFee || 100,
+      previousBalance: 0,
+      lastPaymentDate: existingPayment ? existingPayment.paymentDate : 'None',
+      lastPaymentAmount: existingPayment ? existingPayment.amountPaid : 0,
+      lastPaymentStatus: existingPayment ? existingPayment.status : 'None'
     };
-  }
-
-  // 2. Fallback: Search Members list by Roll Number
-  const members = getStoredMembers();
-  const matchedMember = members.find(
-    (m) => m.rollNumber.trim().toUpperCase() === queryRef
-  );
-
-  if (matchedMember) {
-    const storedPhoneDigits = String(matchedMember.phone || "").replace(/\D/g, "");
-    const storedMobileLast4 = storedPhoneDigits.slice(-4);
-
-    if (storedMobileLast4 !== mobileLast4) {
-      return {
-        success: false,
-        message: "The mobile number verification failed. Please enter the correct last 4 digits of your registered mobile number."
-      };
-    }
-
-    const maskedPhone = `******${storedMobileLast4}`;
 
     return {
       success: true,
-      message: "Member verified successfully.",
-      data: {
-        registrationRef: "",
-        rollNumber: matchedMember.rollNumber,
-        fullName: matchedMember.fullName,
-        maskedPhone: maskedPhone,
-        emailAddress: matchedMember.email || "",
-        selectedPlan: matchedMember.planName || "",
-        joiningDate: matchedMember.joiningDate || "",
-        membershipStartDate: matchedMember.joiningDate || "",
-        membershipExpiryDate: matchedMember.membershipExpiry || "",
-        registrationStatus: 'Approved',
-        memberStatus: matchedMember.status || 'Active',
-        paymentStatus: 'Successful',
-        registrationFee: 100,
-        previousBalance: matchedMember.previousBalance || 0,
-        lastPaymentDate: matchedMember.lastPaymentDate || "",
-        lastPaymentAmount: 0,
-        lastPaymentStatus: 'Successful',
-        planId: matchedMember.planId,
-        id: matchedMember.id,
-      }
+      code: "MEMBER_VERIFIED",
+      message: "Your registration has been approved.",
+      member: feeData,
+      data: feeData
     };
   }
 
   return {
     success: false,
-    message: "No registration or member record was found matching the entered reference number."
+    code: "DETAILS_MISMATCH",
+    message: "Member details do not match. Please check the entered information."
   };
 }
+
+export function normalizeId(value: any): string {
+  return String(value || '').trim().toUpperCase();
+}
+
+export function getMemberFeeHistory(data: {
+  rollNumber?: string;
+  registrationReferenceNumber?: string;
+  registrationRef?: string;
+  referenceOrRollNumber?: string;
+}): {
+  success: boolean;
+  code: string;
+  message: string;
+  history: FeePaymentRecord[];
+} {
+  const verifiedRoll = normalizeId(data.rollNumber);
+  const verifiedRegRef = normalizeId(
+    data.registrationReferenceNumber || data.registrationRef || data.referenceOrRollNumber
+  );
+
+  if (!verifiedRoll && !verifiedRegRef) {
+    return {
+      success: false,
+      code: 'INVALID_REQUEST',
+      message: 'Roll number or registration reference number is required.',
+      history: [],
+    };
+  }
+
+  const allPayments = getStoredPayments();
+  let updatedPayments = false;
+
+  const matched = allPayments.filter((p) => {
+    const pRoll = normalizeId(p.rollNumber);
+    const pRef = normalizeId(p.registrationRef || p.registrationReferenceNumber);
+
+    const isMatch =
+      (verifiedRoll !== '' && pRoll !== '' && pRoll === verifiedRoll) ||
+      (verifiedRegRef !== '' && pRef !== '' && pRef === verifiedRegRef);
+
+    if (isMatch && verifiedRoll !== '' && (!pRoll || pRoll === 'UNASSIGNED') && pRef === verifiedRegRef) {
+      p.rollNumber = data.rollNumber || verifiedRoll;
+      updatedPayments = true;
+    }
+
+    return isMatch;
+  });
+
+  if (updatedPayments) {
+    savePayments(allPayments);
+  }
+
+  matched.sort((a, b) => {
+    const timeA = new Date(a.paymentDate || a.createdDate || a.createdAt || a.timestamp || 0).getTime();
+    const timeB = new Date(b.paymentDate || b.createdDate || b.createdAt || b.timestamp || 0).getTime();
+    return timeB - timeA;
+  });
+
+  if (matched.length === 0) {
+    return {
+      success: true,
+      code: 'NO_FEE_HISTORY',
+      message: 'No previous fee payment records were found.',
+      history: [],
+    };
+  }
+
+  return {
+    success: true,
+    code: 'FEE_HISTORY_FOUND',
+    message: `${matched.length} payment records found.`,
+    history: matched,
+  };
+}
+

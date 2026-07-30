@@ -16,6 +16,8 @@ import {
   saveActivityLogs,
   seedLocalStorageWithSampleData,
   logAdminActivity,
+  getMemberForFee as getMemberForFeeStorage,
+  getMemberFeeHistory as getMemberFeeHistoryStorage,
 } from './storage';
 
 import { GOOGLE_APPS_SCRIPT_URL, callABFitnessBackend } from './config';
@@ -485,78 +487,11 @@ async function fallbackAppsScriptBackend<T>(
   }
 
   if (action === 'getMemberForFee') {
-    const queryRef = String(data.referenceOrRollNumber || data.rollNumber || data.registrationRefOrRoll || "").trim().toLowerCase();
-    const mems = getStoredMembers();
-    const regs = getStoredRegistrations();
-
-    const matchedMem = mems.find(m =>
-      (m.rollNumber && m.rollNumber.trim().toLowerCase() === queryRef) ||
-      (m.registrationRef && m.registrationRef.trim().toLowerCase() === queryRef)
-    );
-
-    const matchedReg = !matchedMem ? regs.find(r =>
-      (r.referenceNumber && r.referenceNumber.trim().toLowerCase() === queryRef) ||
-      (r.rollNumber && r.rollNumber.trim().toLowerCase() === queryRef)
-    ) : null;
-
-    if (matchedMem || matchedReg) {
-      const item = matchedMem || matchedReg;
-      const selectedPlan = (item as any).selectedPlan || (item as any).planName || 'Basic Plan';
-      const getPlanAmt = (p: string) => {
-        const pl = p.toLowerCase();
-        if (pl.includes('basic') || pl.includes('monthly gold')) return 999;
-        if (pl.includes('standard')) return 2499;
-        if (pl.includes('premium')) return 4999;
-        return 0;
-      };
-      const feeAmt = getPlanAmt(selectedPlan);
-
-      return {
-        success: true,
-        message: 'Member found for fee payment.',
-        member: {
-          fullName: (item as any).fullName || '',
-          phoneNumber: (item as any).phone || (item as any).phoneNumber || '',
-          emailAddress: (item as any).email || (item as any).emailAddress || '',
-          selectedPlan,
-          finalFeeAmount: feeAmt,
-          feeAmount: feeAmt,
-          previousBalance: (item as any).previousBalance || (item as any).remainingBalance || 0,
-          outstandingBalance: (item as any).previousBalance || (item as any).remainingBalance || 0,
-        },
-        data: {
-          fullName: (item as any).fullName || '',
-          phoneNumber: (item as any).phone || (item as any).phoneNumber || '',
-          emailAddress: (item as any).email || (item as any).emailAddress || '',
-          selectedPlan,
-          finalFeeAmount: feeAmt,
-          feeAmount: feeAmt,
-          previousBalance: (item as any).previousBalance || (item as any).remainingBalance || 0,
-          outstandingBalance: (item as any).previousBalance || (item as any).remainingBalance || 0,
-        }
-      } as any;
-    }
-
-    return {
-      success: false,
-      message: 'No member found with this Roll Number or Registration Reference.',
-    };
+    return getMemberForFeeStorage(data) as any;
   }
 
-  if (action === 'getMemberPaymentHistory') {
-    const targetRoll = String(data.rollNumber || data.referenceOrRollNumber || "").trim().toLowerCase();
-    const allPayments = getStoredPayments();
-    const filtered = allPayments.filter(p => {
-      const pRoll = String(p.rollNumber || "").trim().toLowerCase();
-      const pRef = String(p.registrationRef || p.registrationReferenceNumber || "").trim().toLowerCase();
-      return (pRoll && targetRoll && pRoll === targetRoll) || (pRef && targetRoll && pRef === targetRoll);
-    });
-    return {
-      success: true,
-      message: 'Payment history retrieved successfully.',
-      records: filtered as any,
-      data: filtered as any,
-    };
+  if (action === 'getMemberFeeHistory' || action === 'getMemberPaymentHistory' || action === 'getFeeHistory') {
+    return getMemberFeeHistoryStorage(data) as any;
   }
 
   return {
@@ -1003,24 +938,45 @@ export const apiService = {
     return callGoogleAppsScript('getMemberForFee', payload);
   },
 
-  // 5b. Get Member Payment History
-  getMemberPaymentHistory: (data: {
+  // 5b. Get Member Fee History
+  getMemberFeeHistory: (data: {
     rollNumber?: string;
+    registrationReferenceNumber?: string;
+    registrationRef?: string;
     referenceOrRollNumber?: string;
     phoneFirst4?: string;
     dateOfBirth?: string;
     [key: string]: any;
   }) => {
-    const roll = data.rollNumber || data.referenceOrRollNumber || '';
+    const roll = (data.rollNumber || '').trim().toUpperCase();
+    const regRef = (data.registrationReferenceNumber || data.registrationRef || '').trim().toUpperCase();
     const payload = {
-      action: 'getMemberPaymentHistory',
+      action: 'getMemberFeeHistory',
       rollNumber: roll,
-      referenceOrRollNumber: data.referenceOrRollNumber || roll,
+      registrationReferenceNumber: regRef,
+      registrationRef: regRef,
+      referenceOrRollNumber: data.referenceOrRollNumber || roll || regRef,
       phoneFirst4: data.phoneFirst4 || '',
       dateOfBirth: data.dateOfBirth || '',
       ...data,
     };
-    return callGoogleAppsScript('getMemberPaymentHistory', payload);
+    return callGoogleAppsScript('getMemberFeeHistory', payload);
+  },
+
+  getMemberPaymentHistory: (data: any) => {
+    const roll = (data.rollNumber || '').trim().toUpperCase();
+    const regRef = (data.registrationReferenceNumber || data.registrationRef || '').trim().toUpperCase();
+    const payload = {
+      action: 'getMemberFeeHistory',
+      rollNumber: roll,
+      registrationReferenceNumber: regRef,
+      registrationRef: regRef,
+      referenceOrRollNumber: data.referenceOrRollNumber || roll || regRef,
+      phoneFirst4: data.phoneFirst4 || '',
+      dateOfBirth: data.dateOfBirth || '',
+      ...data,
+    };
+    return callGoogleAppsScript('getMemberFeeHistory', payload);
   },
 
   // 6. Submit Fee Payment
@@ -1294,3 +1250,5 @@ export const apiService = {
   // Seed Sample Data
   seedSampleData: () => callGoogleAppsScript('seedSampleData', {}),
 };
+
+export const api = apiService;

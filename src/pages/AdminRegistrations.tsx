@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { RegistrationRequest } from '../types';
 import { apiService, getSavedAdminToken } from '../lib/api';
-import { Check, CheckCircle2, Eye, Loader2, XCircle, Search, RefreshCw } from 'lucide-react';
+import { Check, CheckCircle2, Eye, Loader2, XCircle, Search, RefreshCw, X } from 'lucide-react';
 
 export interface AdminRegistrationsProps {
   registrations: RegistrationRequest[];
@@ -167,14 +167,24 @@ export const AdminRegistrations: React.FC<AdminRegistrationsProps> = ({
       {/* Header Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-900 p-4 rounded-xl border border-zinc-800">
         <div className="relative flex-1">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
           <input
             type="text"
             placeholder="Search by Ref #, Name, or Phone..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-red-500"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-8 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-all"
           />
+          {searchTerm && (
+            <button
+              type="button"
+              onClick={() => setSearchTerm('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer p-0.5"
+              title="Clear search"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

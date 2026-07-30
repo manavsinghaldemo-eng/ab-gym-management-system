@@ -106,7 +106,7 @@ export const RegistrationSuccessPage: React.FC<RegistrationSuccessPageProps> = (
 
         {/* Important Notice */}
         <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl text-left text-xs text-zinc-400 leading-relaxed">
-          <strong className="text-white">Note:</strong> Please save your Registration Reference Number (<span className="text-red-400 font-mono font-bold">{regRef}</span>). You will need it together with the last 4 digits of your registered mobile number to make your fee payment and check registration verification status.
+          <strong className="text-white">Note:</strong> Please save your Registration Reference Number (<span className="text-red-400 font-mono font-bold">{regRef}</span>). You will need it together with the first 4 digits of your registered mobile number to make your fee payment and check registration verification status.
         </div>
 
         {/* Navigation Actions */}
