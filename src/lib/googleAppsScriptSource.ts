@@ -518,12 +518,37 @@ function handleGetRegistrationForFee(data) {
       status === 'active' ||
       status === 'successful'
     ) {
+      // Recover missing Registration Reference Number from Registrations sheet if absent in Members sheet
+      if (matchedRow && !matchedRow.registrationReference && matchedRow.rollNumber) {
+        try {
+          var regSheetForRef = ss.getSheetByName(SHEETS.REGISTRATIONS);
+          if (regSheetForRef) {
+            var regRowsForRef = getSheetObjects(regSheetForRef);
+            var targetRollNorm = normalizeId(matchedRow.rollNumber);
+            for (var kRef = 0; kRef < regRowsForRef.length; kRef++) {
+              var rObj = regRowsForRef[kRef];
+              var rRollNorm = normalizeId(rObj['Roll Number']);
+              if (rRollNorm && rRollNorm === targetRollNorm) {
+                var recoveredRef = rObj['Registration Reference Number'] || '';
+                if (recoveredRef) {
+                  matchedRow.registrationReference = recoveredRef;
+                  break;
+                }
+              }
+            }
+          }
+        } catch (recErr) {
+          Logger.log("[handleGetRegistrationForRef] Recovery error: " + recErr.toString());
+        }
+      }
+
       var maskedPhone = matchedRow.phone ? ('******' + extractFirst4Digits(matchedRow.phone)) : 'N/A';
       var memberObj = {
         fullName: matchedRow.fullName,
         rollNumber: matchedRow.rollNumber || '',
-        registrationReference: matchedRow.registrationReference,
-        registrationRef: matchedRow.registrationReference,
+        registrationReferenceNumber: matchedRow.registrationReference || '',
+        registrationReference: matchedRow.registrationReference || '',
+        registrationRef: matchedRow.registrationReference || '',
         phone: matchedRow.phone,
         phoneNumber: matchedRow.phone,
         emailAddress: matchedRow.emailAddress,
@@ -566,8 +591,8 @@ function handleGetMemberFeeHistory(data) {
     var rollNumber = normalizeId(data.rollNumber || data.verifiedRollNumber || data.rollNo || '');
     var regRef = normalizeId(data.registrationReferenceNumber || data.registrationRef || data.regRef || data.referenceOrRollNumber || '');
 
-    Logger.log("[getMemberFeeHistory] Normalized Roll: " + rollNumber);
-    Logger.log("[getMemberFeeHistory] Normalized RegRef: " + regRef);
+    Logger.log("[getMemberFeeHistory] Verified Roll: " + rollNumber);
+    Logger.log("[getMemberFeeHistory] Verified RegRef: " + regRef);
 
     if (!rollNumber && !regRef) {
       return createJsonResponse({
@@ -585,18 +610,23 @@ function handleGetMemberFeeHistory(data) {
       return createJsonResponse({
         success: false,
         code: 'FEE_HISTORY_ERROR',
-        message: 'Fee history is temporarily unavailable. Please try again.'
+        canSubmitNewPayment: false,
+        blockingReason: 'NO_BLOCKING_PAYMENT',
+        message: 'Fee history is temporarily unavailable. Please try again before making a payment.'
       });
     }
 
     var dataValues = sheet.getDataRange().getValues();
-    Logger.log("[getMemberFeeHistory] Fee Payments row count: " + (dataValues ? dataValues.length : 0));
+    var totalRows = dataValues ? dataValues.length : 0;
+    Logger.log("[getMemberFeeHistory] Total payment rows: " + totalRows);
 
     if (!dataValues || dataValues.length < 2) {
       return createJsonResponse({
         success: true,
         code: 'NO_FEE_HISTORY',
         history: [],
+        canSubmitNewPayment: true,
+        blockingReason: 'NO_BLOCKING_PAYMENT',
         message: 'No previous fee payment records were found.'
       });
     }
@@ -606,6 +636,7 @@ function handleGetMemberFeeHistory(data) {
     Logger.log("[getMemberFeeHistory] Detected Fee Payments headers: " + JSON.stringify(colMap));
 
     var matchedHistory = [];
+    var matchedStatuses = [];
     var needsSheetUpdate = false;
 
     for (var i = 1; i < dataValues.length; i++) {
@@ -614,12 +645,10 @@ function handleGetMemberFeeHistory(data) {
       var rowRoll = colMap.rollNumber >= 0 ? normalizeId(row[colMap.rollNumber]) : '';
       var rowRegRef = colMap.registrationReferenceNumber >= 0 ? normalizeId(row[colMap.registrationReferenceNumber]) : '';
 
-      var isMatched = false;
-      if (rollNumber !== '' && rowRoll !== '' && rowRoll === rollNumber) {
-        isMatched = true;
-      } else if (regRef !== '' && rowRegRef !== '' && rowRegRef === regRef) {
-        isMatched = true;
-      }
+      var rollMatch = rollNumber !== '' && rowRoll !== '' && rowRoll === rollNumber;
+      var registrationMatch = regRef !== '' && rowRegRef !== '' && rowRegRef === regRef;
+
+      var isMatched = rollMatch || registrationMatch;
 
       if (isMatched) {
         if (rollNumber !== '' && (rowRoll === '' || rowRoll === 'UNASSIGNED') && colMap.rollNumber >= 0 && rowRegRef === regRef) {
@@ -627,8 +656,20 @@ function handleGetMemberFeeHistory(data) {
             sheet.getRange(i + 1, colMap.rollNumber + 1).setValue(data.rollNumber || rollNumber);
             row[colMap.rollNumber] = data.rollNumber || rollNumber;
             needsSheetUpdate = true;
+            Logger.log("[getMemberFeeHistory] Repaired missing Roll Number for row " + (i + 1));
           } catch (updateErr) {
             Logger.log("[getMemberFeeHistory] Error updating roll number in row: " + updateErr.toString());
+          }
+        }
+
+        if (regRef !== '' && (rowRegRef === '' || rowRegRef === 'UNASSIGNED') && colMap.registrationReferenceNumber >= 0 && rowRoll === rollNumber) {
+          try {
+            sheet.getRange(i + 1, colMap.registrationReferenceNumber + 1).setValue(data.registrationReferenceNumber || regRef);
+            row[colMap.registrationReferenceNumber] = data.registrationReferenceNumber || regRef;
+            needsSheetUpdate = true;
+            Logger.log("[getMemberFeeHistory] Repaired missing Registration Ref for row " + (i + 1));
+          } catch (updateErr) {
+            Logger.log("[getMemberFeeHistory] Error updating reg ref in row: " + updateErr.toString());
           }
         }
 
@@ -645,6 +686,7 @@ function handleGetMemberFeeHistory(data) {
         var receiptNum = colMap.receiptNumber >= 0 ? cleanString(row[colMap.receiptNumber]) : '';
 
         if (!payStatus) payStatus = 'Pending Verification';
+        matchedStatuses.push(payStatus);
 
         var item = {
           feeReferenceNumber: feeRefNum,
@@ -670,7 +712,8 @@ function handleGetMemberFeeHistory(data) {
       }
     }
 
-    Logger.log("[getMemberFeeHistory] Number of matched records: " + matchedHistory.length);
+    Logger.log("[getMemberFeeHistory] Number of matching payment rows: " + matchedHistory.length);
+    Logger.log("[getMemberFeeHistory] Matching status values: " + JSON.stringify(matchedStatuses));
 
     if (needsSheetUpdate) {
       SpreadsheetApp.flush();
@@ -684,11 +727,15 @@ function handleGetMemberFeeHistory(data) {
       return timeB - timeA;
     });
 
+    var evalRes = evaluateBlockingReasonInGAS(matchedHistory);
+
     if (matchedHistory.length === 0) {
       return createJsonResponse({
         success: true,
         code: 'NO_FEE_HISTORY',
         history: [],
+        canSubmitNewPayment: true,
+        blockingReason: 'NO_BLOCKING_PAYMENT',
         message: 'No previous fee payment records were found.'
       });
     }
@@ -698,7 +745,10 @@ function handleGetMemberFeeHistory(data) {
       code: 'FEE_HISTORY_FOUND',
       history: matchedHistory,
       records: matchedHistory,
-      data: matchedHistory
+      data: matchedHistory,
+      canSubmitNewPayment: evalRes.canSubmitNewPayment,
+      blockingReason: evalRes.blockingReason,
+      message: matchedHistory.length + ' payment records found.'
     });
 
   } catch (err) {
@@ -706,9 +756,43 @@ function handleGetMemberFeeHistory(data) {
     return createJsonResponse({
       success: false,
       code: 'FEE_HISTORY_ERROR',
-      message: 'Fee history is temporarily unavailable. Please try again.'
+      canSubmitNewPayment: false,
+      blockingReason: 'NO_BLOCKING_PAYMENT',
+      message: 'Fee history is temporarily unavailable. Please try again before making a payment.'
     });
   }
+}
+
+function evaluateBlockingReasonInGAS(records) {
+  if (!records || !records.length) {
+    return { canSubmitNewPayment: true, blockingReason: 'NO_BLOCKING_PAYMENT' };
+  }
+
+  var hasSuccessful = false;
+  var hasPending = false;
+  var hasRejected = false;
+
+  for (var k = 0; k < records.length; k++) {
+    var st = String(records[k].paymentStatus || records[k].status || '').trim().toLowerCase();
+    if (st === 'successful' || st === 'success' || st === 'approved' || st === 'verified' || st === 'paid' || st === 'completed') {
+      hasSuccessful = true;
+    } else if (st === 'pending' || st === 'pending verification' || st === 'submitted' || st === 'under review') {
+      hasPending = true;
+    } else if (st === 'rejected' || st === 'declined' || st === 'failed') {
+      hasRejected = true;
+    }
+  }
+
+  if (hasSuccessful) {
+    return { canSubmitNewPayment: false, blockingReason: 'PAYMENT_ALREADY_SUCCESSFUL' };
+  }
+  if (hasPending) {
+    return { canSubmitNewPayment: false, blockingReason: 'PAYMENT_PENDING_VERIFICATION' };
+  }
+  if (hasRejected) {
+    return { canSubmitNewPayment: true, blockingReason: 'PREVIOUS_PAYMENT_REJECTED' };
+  }
+  return { canSubmitNewPayment: true, blockingReason: 'NO_BLOCKING_PAYMENT' };
 }
 
 function getFeePaymentsHeaderMap(headerRow) {
@@ -732,7 +816,7 @@ function getFeePaymentsHeaderMap(headerRow) {
   for (var i = 0; i < headerRow.length; i++) {
     var h = String(headerRow[i] || "").trim().toLowerCase();
 
-    if (map.feeReferenceNumber === -1 && (h.indexOf('fee reference') !== -1 || h.indexOf('fee ref') !== -1 || h === 'ref no')) {
+    if (map.feeReferenceNumber === -1 && (h.indexOf('fee reference') !== -1 || h.indexOf('fee ref') !== -1 || h === 'ref no' || h === 'reference number')) {
       map.feeReferenceNumber = i;
     } else if (map.registrationReferenceNumber === -1 && (h.indexOf('registration reference') !== -1 || h.indexOf('reg ref') !== -1 || h.indexOf('registration ref') !== -1)) {
       map.registrationReferenceNumber = i;
@@ -742,13 +826,13 @@ function getFeePaymentsHeaderMap(headerRow) {
       map.fullName = i;
     } else if (map.plan === -1 && (h.indexOf('selected plan') !== -1 || h.indexOf('plan') !== -1)) {
       map.plan = i;
-    } else if (map.feeMonth === -1 && (h.indexOf('fee month') !== -1 || h.indexOf('month') !== -1)) {
+    } else if (map.feeMonth === -1 && (h.indexOf('fee month') !== -1 || h.indexOf('membership period') !== -1 || h.indexOf('month') !== -1)) {
       map.feeMonth = i;
     } else if (map.amount === -1 && (h.indexOf('current fee amount') !== -1 || h.indexOf('final amount') !== -1 || h.indexOf('total payable amount') !== -1 || h.indexOf('fee amount') !== -1 || h.indexOf('amount paid') !== -1 || h === 'amount')) {
       map.amount = i;
     } else if (map.paymentMethod === -1 && (h.indexOf('payment method') !== -1 || h.indexOf('payment mode') !== -1 || h === 'mode')) {
       map.paymentMethod = i;
-    } else if (map.transactionId === -1 && (h.indexOf('transaction id') !== -1 || h.indexOf('upi transaction') !== -1 || h.indexOf('txn id') !== -1)) {
+    } else if (map.transactionId === -1 && (h.indexOf('upi transaction') !== -1 || h.indexOf('transaction id') !== -1 || h.indexOf('txn id') !== -1)) {
       map.transactionId = i;
     } else if (map.paymentDate === -1 && (h.indexOf('payment date') !== -1 || h === 'date' || h === 'timestamp' || h.indexOf('created date') !== -1)) {
       map.paymentDate = i;
@@ -1542,10 +1626,10 @@ function handleAdminSubmitFeePayment(data) {
     var receiptUrl = 'https://ab-fitness-receipts.example.com/receipt/' + receiptNo + '.pdf';
 
     var refOrRoll = cleanString(data.referenceOrRollNumber);
-    var memberName = 'Member (' + refOrRoll + ')';
-    var phone = '';
-    var email = '';
-    var selectedPlan = '';
+    var memberName = cleanString(data.memberName || data.fullName) || ('Member (' + refOrRoll + ')');
+    var phone = cleanString(data.phone || data.phoneNumber);
+    var email = cleanString(data.email || data.emailAddress);
+    var selectedPlan = cleanString(data.selectedPlan);
 
     try {
       var memSheet = ss.getSheetByName(SHEETS.MEMBERS);
@@ -1900,6 +1984,13 @@ function setSetting(key, val) {
 function cleanString(val) {
   if (val === null || val === undefined) return '';
   return String(val).trim();
+}
+
+function normalizeId(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
 }
 
 function formatDate(date) {

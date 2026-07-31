@@ -629,14 +629,30 @@ export function getMemberForFee(data: GetMemberForFeeData): GetMemberForFeeRespo
     status === 'active' ||
     status === 'successful'
   ) {
+    // Recover missing registrationRef if absent in Members record
+    if (matchedRecord && !matchedRecord.registrationRef && matchedRecord.rollNumber) {
+      const regs = getStoredRegistrations();
+      const targetRollNorm = normalizeId(matchedRecord.rollNumber);
+      for (const r of regs) {
+        const rRollNorm = normalizeId(r.rollNumber);
+        if (rRollNorm && rRollNorm === targetRollNorm) {
+          if (r.registrationRef) {
+            matchedRecord.registrationRef = r.registrationRef;
+            break;
+          }
+        }
+      }
+    }
+
     const maskedPhone = matchedRecord.phone ? (`******${extractFirst4Digits(matchedRecord.phone)}`) : 'N/A';
     const payments = getStoredPayments();
     const existingPayment = payments.find(
       (p) => p.registrationRef === matchedRecord.registrationRef || (matchedRecord.rollNumber && p.rollNumber === matchedRecord.rollNumber)
     );
 
-    const feeData: MemberFeeDetailsData = {
+    const feeData: MemberFeeDetailsData & { registrationReferenceNumber?: string } = {
       registrationRef: matchedRecord.registrationRef,
+      registrationReferenceNumber: matchedRecord.registrationRef,
       rollNumber: matchedRecord.rollNumber || "",
       fullName: matchedRecord.fullName,
       maskedPhone: maskedPhone,
@@ -675,6 +691,64 @@ export function normalizeId(value: any): string {
   return String(value || '').trim().toUpperCase();
 }
 
+export function evaluateFeePaymentBlockingStorage(records: FeePaymentRecord[]): {
+  canSubmitNewPayment: boolean;
+  blockingReason: 'PAYMENT_ALREADY_SUCCESSFUL' | 'PAYMENT_PENDING_VERIFICATION' | 'PREVIOUS_PAYMENT_REJECTED' | 'NO_BLOCKING_PAYMENT';
+} {
+  if (!records || !Array.isArray(records) || records.length === 0) {
+    return { canSubmitNewPayment: true, blockingReason: 'NO_BLOCKING_PAYMENT' };
+  }
+
+  let hasSuccessful = false;
+  let hasPending = false;
+  let hasRejected = false;
+
+  for (const r of records) {
+    const st = String(r.paymentStatus || r.status || '').trim().toLowerCase();
+    if (['successful', 'success', 'approved', 'verified', 'paid', 'completed'].includes(st)) {
+      hasSuccessful = true;
+    } else if (['pending', 'pending verification', 'submitted', 'under review'].includes(st)) {
+      hasPending = true;
+    } else if (['rejected', 'declined', 'failed'].includes(st)) {
+      hasRejected = true;
+    }
+  }
+
+  if (hasSuccessful) {
+    return { canSubmitNewPayment: false, blockingReason: 'PAYMENT_ALREADY_SUCCESSFUL' };
+  }
+  if (hasPending) {
+    return { canSubmitNewPayment: false, blockingReason: 'PAYMENT_PENDING_VERIFICATION' };
+  }
+  if (hasRejected) {
+    return { canSubmitNewPayment: true, blockingReason: 'PREVIOUS_PAYMENT_REJECTED' };
+  }
+  return { canSubmitNewPayment: true, blockingReason: 'NO_BLOCKING_PAYMENT' };
+}
+
+export function linkRollNumberToPaymentsStorage(regRef: string, rollNumber: string): void {
+  const normRef = normalizeId(regRef);
+  const normRoll = normalizeId(rollNumber);
+  if (!normRef || !normRoll) return;
+
+  const payments = getStoredPayments();
+  let changed = false;
+
+  payments.forEach((p) => {
+    const pRef = normalizeId(p.registrationRef || p.registrationReferenceNumber);
+    if (pRef === normRef) {
+      if (!p.rollNumber || p.rollNumber === 'UNASSIGNED' || p.rollNumber !== normRoll) {
+        p.rollNumber = rollNumber;
+        changed = true;
+      }
+    }
+  });
+
+  if (changed) {
+    savePayments(payments);
+  }
+}
+
 export function getMemberFeeHistory(data: {
   rollNumber?: string;
   registrationReferenceNumber?: string;
@@ -685,6 +759,8 @@ export function getMemberFeeHistory(data: {
   code: string;
   message: string;
   history: FeePaymentRecord[];
+  canSubmitNewPayment: boolean;
+  blockingReason: string;
 } {
   const verifiedRoll = normalizeId(data.rollNumber);
   const verifiedRegRef = normalizeId(
@@ -697,6 +773,8 @@ export function getMemberFeeHistory(data: {
       code: 'INVALID_REQUEST',
       message: 'Roll number or registration reference number is required.',
       history: [],
+      canSubmitNewPayment: false,
+      blockingReason: 'NO_BLOCKING_PAYMENT',
     };
   }
 
@@ -706,10 +784,18 @@ export function getMemberFeeHistory(data: {
   const matched = allPayments.filter((p) => {
     const pRoll = normalizeId(p.rollNumber);
     const pRef = normalizeId(p.registrationRef || p.registrationReferenceNumber);
+    const pFeeRef = normalizeId(p.feeReferenceNumber);
+    const pReceipt = normalizeId(p.receiptNumber);
+    const pPhone = normalizeId(p.phone || p.phoneNumber || p.memberPhone);
 
-    const isMatch =
-      (verifiedRoll !== '' && pRoll !== '' && pRoll === verifiedRoll) ||
-      (verifiedRegRef !== '' && pRef !== '' && pRef === verifiedRegRef);
+    const rollMatch = verifiedRoll !== '' && pRoll !== '' && pRoll === verifiedRoll;
+    const registrationMatch = verifiedRegRef !== '' && pRef !== '' && pRef === verifiedRegRef;
+    const feeRefMatch = (verifiedRoll !== '' && pFeeRef === verifiedRoll) || (verifiedRegRef !== '' && pFeeRef === verifiedRegRef);
+    const receiptMatch = (verifiedRoll !== '' && pReceipt === verifiedRoll) || (verifiedRegRef !== '' && pReceipt === verifiedRegRef);
+    const refOrRollMatch = (verifiedRoll !== '' && (pRoll === verifiedRoll || pRef === verifiedRoll)) ||
+                           (verifiedRegRef !== '' && (pRoll === verifiedRegRef || pRef === verifiedRegRef));
+
+    const isMatch = rollMatch || registrationMatch || feeRefMatch || receiptMatch || refOrRollMatch;
 
     if (isMatch && verifiedRoll !== '' && (!pRoll || pRoll === 'UNASSIGNED') && pRef === verifiedRegRef) {
       p.rollNumber = data.rollNumber || verifiedRoll;
@@ -729,12 +815,16 @@ export function getMemberFeeHistory(data: {
     return timeB - timeA;
   });
 
+  const evaluation = evaluateFeePaymentBlockingStorage(matched);
+
   if (matched.length === 0) {
     return {
       success: true,
       code: 'NO_FEE_HISTORY',
       message: 'No previous fee payment records were found.',
       history: [],
+      canSubmitNewPayment: true,
+      blockingReason: 'NO_BLOCKING_PAYMENT',
     };
   }
 
@@ -743,6 +833,8 @@ export function getMemberFeeHistory(data: {
     code: 'FEE_HISTORY_FOUND',
     message: `${matched.length} payment records found.`,
     history: matched,
+    canSubmitNewPayment: evaluation.canSubmitNewPayment,
+    blockingReason: evaluation.blockingReason,
   };
 }
 

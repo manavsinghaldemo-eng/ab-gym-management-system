@@ -62,20 +62,24 @@ export const RegistrationSuccessPage: React.FC<RegistrationSuccessPageProps> = (
             </div>
           </div>
 
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 uppercase tracking-widest font-mono">
-            <Clock className="w-3.5 h-3.5 animate-pulse" />
-            REGISTRATION SUBMITTED
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 uppercase tracking-widest font-mono">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            FORM SUBMITTED SUCCESSFULLY
           </span>
 
           <h1 className="text-3xl sm:text-4xl font-black text-white font-display uppercase tracking-tight">
-            APPLICATION RECEIVED
+            THANK YOU FOR SUBMITTING!
           </h1>
         </div>
 
         {/* Message Box */}
-        <div className="bg-amber-950/30 border border-amber-500/30 p-5 rounded-2xl text-left space-y-2">
-          <p className="text-sm text-amber-200 font-medium leading-relaxed">
-            “Your registration has been submitted and is pending admin verification. Your Roll Number will be generated only after admin approval.”
+        <div className="bg-emerald-950/40 border border-emerald-500/40 p-6 rounded-2xl text-left space-y-2.5 shadow-xl">
+          <div className="flex items-center gap-2 text-emerald-400 font-bold text-base">
+            <Sparkles className="w-5 h-5 shrink-0" />
+            <span>Registration Application Received</span>
+          </div>
+          <p className="text-sm sm:text-base text-emerald-100 font-medium leading-relaxed font-sans">
+            Thank you for submitting the form! Our team will review & approve your application. Please come to the <strong className="text-white font-bold underline decoration-emerald-500/60">AB Fitness Office</strong> for verification and setup.
           </p>
         </div>
 

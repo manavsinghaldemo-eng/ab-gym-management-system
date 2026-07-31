@@ -1,10 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   getStoredSettings,
   getStoredPlans,
   getStoredPayments,
+  getStoredMembers,
+  getStoredRegistrations,
   getMemberForFee,
+  evaluateFeePaymentBlockingStorage,
   MemberFeeDetailsData,
+  normalizeId,
 } from '../lib/storage';
 import { AB_FITNESS_UPI_ID } from '../data/initialData';
 import { api, apiService, getScriptUrl, GOOGLE_APPS_SCRIPT_URL } from '../lib/api';
@@ -37,7 +41,13 @@ import {
   Info,
   Sparkles,
   RefreshCw,
+  History,
+  Filter,
+  Eye,
+  XCircle,
+  FileText,
 } from 'lucide-react';
+import { resolveFeeMemberName } from './AdminPage';
 
 interface PayFeePageProps {
   initialRegistrationRef?: string;
@@ -114,7 +124,99 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
   const [feeHistoryRecords, setFeeHistoryRecords] = useState<FeePaymentRecord[]>([]);
   const [historyError, setHistoryError] = useState<string>('');
   const [isLoadingFeeHistory, setIsLoadingFeeHistory] = useState<boolean>(false);
+  const [canSubmitNewPayment, setCanSubmitNewPayment] = useState<boolean>(true);
+  const [blockingReason, setBlockingReason] = useState<string>('NO_BLOCKING_PAYMENT');
   const [selectedReceiptRecord, setSelectedReceiptRecord] = useState<FeePaymentRecord | null>(null);
+
+  // Portal Navigation & Public History Search State
+  const [activePortalTab, setActivePortalTab] = useState<'pay' | 'publicHistory'>('pay');
+  const [publicSearchQuery, setPublicSearchQuery] = useState<string>('');
+  const [publicStatusFilter, setPublicStatusFilter] = useState<string>('All');
+  const [publicFeeRecords, setPublicFeeRecords] = useState<FeePaymentRecord[]>([]);
+  const [isPublicLoading, setIsPublicLoading] = useState<boolean>(false);
+
+  const loadPublicFeeHistory = useCallback(async (query: string = '') => {
+    setIsPublicLoading(true);
+    try {
+      const localPayments = getStoredPayments();
+      let remotePayments: FeePaymentRecord[] = [];
+
+      try {
+        const cleanQ = query.trim().toUpperCase();
+        const res: any = await api.getMemberFeeHistory({
+          action: 'getMemberFeeHistory',
+          rollNumber: cleanQ,
+          registrationReferenceNumber: cleanQ,
+          referenceOrRollNumber: cleanQ,
+        });
+        if (res && res.history && Array.isArray(res.history)) {
+          remotePayments = res.history;
+        }
+      } catch (err) {
+        console.warn("Remote fee history fetch error, falling back to local payments:", err);
+      }
+
+      const mergedMap = new Map<string, FeePaymentRecord>();
+      remotePayments.forEach((p) => {
+        const key = p.feeReferenceNumber || p.id || Math.random().toString();
+        mergedMap.set(key, p);
+      });
+      localPayments.forEach((p) => {
+        const key = p.feeReferenceNumber || p.id || Math.random().toString();
+        if (!mergedMap.has(key)) {
+          mergedMap.set(key, p);
+        }
+      });
+
+      const localMembers = getStoredMembers();
+      const localRegs = getStoredRegistrations();
+
+      const allMerged = Array.from(mergedMap.values()).map((p) => {
+        const resolvedName = resolveFeeMemberName(p, localMembers, localRegs);
+        return {
+          ...p,
+          memberName: resolvedName,
+          fullName: resolvedName,
+        };
+      });
+      allMerged.sort((a, b) => {
+        const dateA = new Date(a.paymentDate || a.createdDate || a.createdAt || a.timestamp || 0).getTime();
+        const dateB = new Date(b.paymentDate || b.createdDate || b.createdAt || b.timestamp || 0).getTime();
+        return dateB - dateA;
+      });
+
+      setPublicFeeRecords(allMerged);
+    } catch (err) {
+      console.error("Error loading public fee history:", err);
+    } finally {
+      setIsPublicLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPublicFeeHistory();
+  }, [loadPublicFeeHistory]);
+
+  const filteredPublicRecords = publicFeeRecords.filter((rec) => {
+    const q = publicSearchQuery.trim().toLowerCase();
+    const matchesQuery =
+      !q ||
+      (rec.feeReferenceNumber || '').toLowerCase().includes(q) ||
+      (rec.rollNumber || '').toLowerCase().includes(q) ||
+      (rec.registrationReferenceNumber || rec.registrationRef || '').toLowerCase().includes(q) ||
+      (rec.memberName || rec.fullName || '').toLowerCase().includes(q) ||
+      (rec.phone || rec.memberPhone || rec.phoneNumber || '').toLowerCase().includes(q) ||
+      (rec.upiTransactionId || rec.upiTxnId || '').toLowerCase().includes(q);
+
+    const statusStr = (rec.paymentStatus || rec.status || 'Pending Verification').toLowerCase();
+    const matchesStatus =
+      publicStatusFilter === 'All' ||
+      (publicStatusFilter === 'Successful' && (statusStr === 'approved' || statusStr === 'successful')) ||
+      (publicStatusFilter === 'Pending Verification' && statusStr === 'pending verification') ||
+      (publicStatusFilter === 'Rejected' && statusStr === 'rejected');
+
+    return matchesQuery && matchesStatus;
+  });
 
   // Submission State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -138,6 +240,8 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
     });
     setFeeHistoryRecords([]);
     setHistoryError('');
+    setCanSubmitNewPayment(true);
+    setBlockingReason('NO_BLOCKING_PAYMENT');
     setSelectedReceiptRecord(null);
     setPreviousBalance(0);
     setDiscountAmount(0);
@@ -194,70 +298,117 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
     setIsLoadingFeeHistory(true);
     setHistoryError('');
 
+    const normRoll = normalizeId(targetRoll);
+    const normRegRef = normalizeId(targetRegRef);
+
+    // Requirement 5: Safe Logging
+    console.log("[Fee History Request] Sent normalized Roll Number:", normRoll);
+    console.log("[Fee History Request] Sent normalized Registration Reference Number:", normRegRef);
+    console.log("[Fee History Request] Backend action name: getMemberFeeHistory");
+
     try {
-      const res = await api.getMemberFeeHistory({
-        rollNumber: targetRoll,
-        registrationReferenceNumber: targetRegRef,
-        registrationRef: targetRegRef,
-        referenceOrRollNumber: targetRoll || targetRegRef,
+      const res: any = await api.getMemberFeeHistory({
+        action: "getMemberFeeHistory",
+        rollNumber: normRoll,
+        registrationReferenceNumber: normRegRef,
+        registrationRef: normRegRef,
+        referenceOrRollNumber: normRoll || normRegRef,
         phoneFirst4: verifiedPhoneFirst4 || phoneFirst4 || cleanPhone,
         dateOfBirth: verifiedCredentials.dateOfBirth || dateOfBirth,
       });
 
-      console.log("AB GYM BACKEND getMemberFeeHistory response:", res);
+      console.log("[Fee History Response] Backend response code:", res?.code || (res?.success ? 'FEE_HISTORY_FOUND' : 'ERROR'));
 
       if (res && res.success === false) {
-        setHistoryError(res.message || "Fee history is temporarily unavailable. Please try again.");
-        setFeeHistoryRecords([]);
-      } else if (res) {
-        const resAny = res as any;
-        const rawHistory =
-          resAny.history ||
-          resAny.records ||
-          resAny.data?.records ||
-          resAny.data ||
-          [];
-
-        const fetchedList: FeePaymentRecord[] = Array.isArray(rawHistory) ? rawHistory : [];
-
-        // Merge local storage payments matching targetRoll or targetRegRef
+        console.log("[Fee History Response] Backend returned success: false. Checking local storage records...");
         const localPayments = getStoredPayments();
-        const mRoll = (targetRoll || '').trim().toUpperCase();
-        const mReg = (targetRegRef || '').trim().toUpperCase();
-
         const matchedLocal = localPayments.filter((p) => {
-          const pRoll = (p.rollNumber || '').trim().toUpperCase();
-          const pReg = (p.registrationRef || p.registrationReferenceNumber || '').trim().toUpperCase();
+          const pRoll = normalizeId(p.rollNumber);
+          const pReg = normalizeId(p.registrationRef || p.registrationReferenceNumber);
+          const pFeeRef = normalizeId(p.feeReferenceNumber);
+          const pReceipt = normalizeId(p.receiptNumber);
           return (
-            (pRoll !== '' && mRoll !== '' && pRoll === mRoll) ||
-            (pReg !== '' && mReg !== '' && pReg === mReg)
+            (pRoll !== '' && normRoll !== '' && pRoll === normRoll) ||
+            (pReg !== '' && normRegRef !== '' && pReg === normRegRef) ||
+            (pFeeRef !== '' && (pFeeRef === normRoll || pFeeRef === normRegRef)) ||
+            (pReceipt !== '' && (pReceipt === normRoll || pReceipt === normRegRef))
           );
         });
 
-        const mergedMap = new Map<string, FeePaymentRecord>();
-        fetchedList.forEach((item) => {
-          const key = item.feeReferenceNumber || item.id || Math.random().toString();
-          mergedMap.set(key, item);
-        });
-        matchedLocal.forEach((item) => {
-          const key = item.feeReferenceNumber || item.id || Math.random().toString();
-          if (!mergedMap.has(key)) {
-            mergedMap.set(key, item);
-          }
-        });
+        if (matchedLocal.length > 0) {
+          const sortedLocal = matchedLocal.sort((a, b) => {
+            const dateA = new Date(a.paymentDate || a.createdDate || a.createdAt || a.timestamp || 0).getTime();
+            const dateB = new Date(b.paymentDate || b.createdDate || b.createdAt || b.timestamp || 0).getTime();
+            return dateB - dateA;
+          });
+          setFeeHistoryRecords(sortedLocal);
+          setHistoryError('');
+          const evalRes = evaluateFeePaymentBlockingStorage(sortedLocal);
+          setCanSubmitNewPayment(evalRes.canSubmitNewPayment);
+          setBlockingReason(evalRes.blockingReason);
+          return;
+        }
 
-        const sortedHistory = Array.from(mergedMap.values()).sort((a, b) => {
-          const dateA = new Date(a.paymentDate || a.createdDate || a.timestamp || 0).getTime();
-          const dateB = new Date(b.paymentDate || b.createdDate || b.timestamp || 0).getTime();
-          return dateB - dateA;
-        });
-
-        setFeeHistoryRecords(sortedHistory);
+        setHistoryError(res.message || "Fee history could not be checked. Please try again before making another payment.");
+        setFeeHistoryRecords([]);
+        setCanSubmitNewPayment(false);
+        setBlockingReason('HISTORY_UNAVAILABLE');
+        return;
       }
+
+      // Requirement 6: Read response.history
+      const rawHistory = Array.isArray(res?.history) ? res.history : (Array.isArray(res?.records) ? res.records : (Array.isArray(res?.data) ? res.data : []));
+      console.log("[Fee History Response] Number of history records returned:", rawHistory.length);
+
+      const fetchedList: FeePaymentRecord[] = Array.isArray(rawHistory) ? rawHistory : [];
+
+      // Merge local storage payments matching normRoll or normRegRef
+      const localPayments = getStoredPayments();
+
+      const matchedLocal = localPayments.filter((p) => {
+        const pRoll = normalizeId(p.rollNumber);
+        const pReg = normalizeId(p.registrationRef || p.registrationReferenceNumber);
+        const pFeeRef = normalizeId(p.feeReferenceNumber);
+        const pReceipt = normalizeId(p.receiptNumber);
+        return (
+          (pRoll !== '' && normRoll !== '' && pRoll === normRoll) ||
+          (pReg !== '' && normRegRef !== '' && pReg === normRegRef) ||
+          (pFeeRef !== '' && (pFeeRef === normRoll || pFeeRef === normRegRef)) ||
+          (pReceipt !== '' && (pReceipt === normRoll || pReceipt === normRegRef))
+        );
+      });
+
+      const mergedMap = new Map<string, FeePaymentRecord>();
+      fetchedList.forEach((item) => {
+        const key = item.feeReferenceNumber || item.id || Math.random().toString();
+        mergedMap.set(key, item);
+      });
+      matchedLocal.forEach((item) => {
+        const key = item.feeReferenceNumber || item.id || Math.random().toString();
+        if (!mergedMap.has(key)) {
+          mergedMap.set(key, item);
+        }
+      });
+
+      const sortedHistory = Array.from(mergedMap.values()).sort((a, b) => {
+        const dateA = new Date(a.paymentDate || a.createdDate || a.createdAt || a.timestamp || 0).getTime();
+        const dateB = new Date(b.paymentDate || b.createdDate || b.createdAt || b.timestamp || 0).getTime();
+        return dateB - dateA;
+      });
+
+      setFeeHistoryRecords(sortedHistory);
+      setHistoryError('');
+
+      const evalRes = evaluateFeePaymentBlockingStorage(sortedHistory);
+      setCanSubmitNewPayment(evalRes.canSubmitNewPayment);
+      setBlockingReason(evalRes.blockingReason);
+
     } catch (err: any) {
       console.error("Error executing getMemberFeeHistory:", err);
-      setHistoryError("Fee history is temporarily unavailable. Please try again.");
+      setHistoryError("Fee history could not be checked. Please try again before making another payment.");
       setFeeHistoryRecords([]);
+      setCanSubmitNewPayment(false);
+      setBlockingReason('HISTORY_UNAVAILABLE');
     } finally {
       setIsLoadingFeeHistory(false);
     }
@@ -704,6 +855,16 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
         verifiedCredentials.referenceOrRollNumber || verifiedRegistrationRef || referenceOrRollNumber.trim(),
       rollNumber:
         verifiedMember.rollNumber,
+      memberName:
+        verifiedRecord?.fullName || verifiedRecord?.memberName || verifiedRecord?.name || '',
+      fullName:
+        verifiedRecord?.fullName || verifiedRecord?.memberName || verifiedRecord?.name || '',
+      phone:
+        verifiedRecord?.phone || verifiedRecord?.phoneNumber || verifiedCredentials.phoneFirst4 || verifiedPhoneFirst4 || phoneFirst4.trim() || '',
+      email:
+        verifiedRecord?.email || verifiedRecord?.emailAddress || '',
+      selectedPlan:
+        selectedPlan || verifiedRecord?.membershipPlan || verifiedRecord?.selectedPlan || '',
       phoneFirst4:
         verifiedCredentials.phoneFirst4 || verifiedPhoneFirst4 || phoneFirst4.trim(),
       dateOfBirth:
@@ -833,8 +994,262 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
         </p>
       </div>
 
-      {/* Member Verification Card */}
-      <div className="bg-[#0A0A0A] border border-white/10 p-6 sm:p-8 rounded-3xl space-y-6 shadow-xl">
+      {/* Portal Navigation Tabs */}
+      <div className="flex justify-center border-b border-white/10 pb-6">
+        <div className="bg-[#0A0A0A] p-1.5 rounded-2xl border border-white/10 inline-flex items-center gap-2 shadow-2xl">
+          <button
+            type="button"
+            onClick={() => setActivePortalTab('pay')}
+            className={`px-6 py-3 rounded-xl font-mono text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+              activePortalTab === 'pay'
+                ? 'bg-[#2563EB] text-white shadow-lg shadow-[#2563EB]/25'
+                : 'text-zinc-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>Pay Membership Fee</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActivePortalTab('publicHistory');
+              loadPublicFeeHistory(publicSearchQuery);
+            }}
+            className={`px-6 py-3 rounded-xl font-mono text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+              activePortalTab === 'publicHistory'
+                ? 'bg-[#2563EB] text-white shadow-lg shadow-[#2563EB]/25'
+                : 'text-zinc-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <History className="w-4 h-4" />
+            <span>Public Fee History & Receipts</span>
+          </button>
+        </div>
+      </div>
+
+      {/* PUBLIC FEE HISTORY TAB VIEW */}
+      {activePortalTab === 'publicHistory' && (
+        <div className="space-y-6">
+          <div className="bg-[#0A0A0A] border border-white/10 p-6 sm:p-8 rounded-3xl space-y-6 shadow-xl">
+            {/* Title Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+              <div>
+                <h2 className="text-xl font-black text-white font-display uppercase tracking-tight flex items-center gap-2">
+                  <Receipt className="w-5 h-5 text-[#2563EB]" />
+                  <span>PUBLIC FEE PAYMENT HISTORY & RECEIPTS</span>
+                </h2>
+                <p className="text-xs text-zinc-400 font-mono mt-1">
+                  Lookup any past gym fee submission, check verification status, or download official payment receipts.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => loadPublicFeeHistory(publicSearchQuery)}
+                disabled={isPublicLoading}
+                className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl text-xs font-mono font-bold text-zinc-200 flex items-center gap-2 transition-colors cursor-pointer self-start sm:self-auto"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isPublicLoading ? 'animate-spin text-blue-400' : ''}`} />
+                <span>Refresh List</span>
+              </button>
+            </div>
+
+            {/* Search Input & Status Filter Controls */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="md:col-span-2 relative">
+                <input
+                  type="text"
+                  value={publicSearchQuery}
+                  onChange={(e) => setPublicSearchQuery(e.target.value)}
+                  placeholder="Search by Roll No, Reg Ref, Fee Ref #, Name, or Mobile..."
+                  className="w-full bg-black border border-white/20 focus:border-[#2563EB] text-white pl-10 pr-10 py-3 rounded-xl text-xs font-mono outline-none transition-colors"
+                />
+                <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3.5" />
+                {publicSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setPublicSearchQuery('')}
+                    className="absolute right-3.5 top-3 text-zinc-500 hover:text-white"
+                  >
+                    <XCircle className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Status Filter Dropdown / Pills */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+                {['All', 'Successful', 'Pending Verification', 'Rejected'].map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => setPublicStatusFilter(status)}
+                    className={`px-3 py-2 rounded-xl text-[11px] font-mono font-bold whitespace-nowrap transition-all cursor-pointer ${
+                      publicStatusFilter === status
+                        ? 'bg-[#2563EB] text-white border border-blue-400'
+                        : 'bg-black/60 border border-white/10 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Results Counter */}
+            <div className="flex items-center justify-between text-xs font-mono text-zinc-400 px-1">
+              <span>Showing {filteredPublicRecords.length} fee payment record(s)</span>
+              {publicSearchQuery && (
+                <span className="text-blue-400">Filter: "{publicSearchQuery}"</span>
+              )}
+            </div>
+
+            {/* Public Fee History Table */}
+            {isPublicLoading ? (
+              <div className="py-16 text-center space-y-3 bg-black/40 rounded-2xl border border-white/5">
+                <Loader2 className="w-8 h-8 text-[#2563EB] animate-spin mx-auto" />
+                <p className="text-xs font-mono text-zinc-400">Loading fee payment records from database & sheets...</p>
+              </div>
+            ) : filteredPublicRecords.length === 0 ? (
+              <div className="py-16 text-center space-y-4 bg-black/40 rounded-2xl border border-white/5 p-6">
+                <FileText className="w-10 h-10 text-zinc-600 mx-auto" />
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-white font-mono">No Fee Payment Records Found</p>
+                  <p className="text-xs text-zinc-400 max-w-md mx-auto">
+                    No matching fee records found. Search by exact Roll Number (e.g. ABG-26-2432), Registration Reference, or Fee Reference Number.
+                  </p>
+                </div>
+                {(publicSearchQuery || publicStatusFilter !== 'All') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPublicSearchQuery('');
+                      setPublicStatusFilter('All');
+                    }}
+                    className="px-4 py-2 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 rounded-xl text-xs font-mono text-blue-300 transition-colors cursor-pointer"
+                  >
+                    Reset Search Filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-white/10 bg-black/60">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-zinc-900/80 border-b border-white/10 text-[10px] font-mono uppercase tracking-wider text-zinc-400">
+                      <th className="p-3.5">Fee Ref #</th>
+                      <th className="p-3.5">Member Details</th>
+                      <th className="p-3.5">Payment Date & Plan</th>
+                      <th className="p-3.5">Amount & Mode</th>
+                      <th className="p-3.5">Status</th>
+                      <th className="p-3.5 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 text-xs font-mono">
+                    {filteredPublicRecords.map((record, index) => {
+                      const status = record.paymentStatus || record.status || 'Pending Verification';
+                      const isApproved = status === 'Approved' || status === 'Successful';
+                      const isRejected = status === 'Rejected';
+                      const isPending = status === 'Pending Verification';
+
+                      const dateFormatted = record.paymentDate
+                        ? new Date(record.paymentDate).toLocaleDateString('en-IN', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                          })
+                        : 'N/A';
+
+                      return (
+                        <tr key={record.feeReferenceNumber || record.id || index} className="hover:bg-white/[0.02] transition-colors">
+                          {/* Fee Ref # */}
+                          <td className="p-3.5">
+                            <span className="font-bold text-white font-mono">{record.feeReferenceNumber || 'ABG-FEE-UNKNOWN'}</span>
+                          </td>
+
+                          {/* Member Details */}
+                          <td className="p-3.5 space-y-0.5">
+                            <p className="font-bold text-zinc-100">{record.memberName || record.fullName || 'Member'}</p>
+                            <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-400">
+                              {record.rollNumber && <span>Roll: {record.rollNumber}</span>}
+                              {(record.registrationReferenceNumber || record.registrationRef) && (
+                                <span>Reg: {record.registrationReferenceNumber || record.registrationRef}</span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Payment Date & Plan */}
+                          <td className="p-3.5 space-y-0.5">
+                            <p className="text-zinc-200">{dateFormatted}</p>
+                            <p className="text-[10px] text-zinc-400">{record.selectedPlan || record.planName || 'Gym Membership Fee'}</p>
+                          </td>
+
+                          {/* Amount & Mode */}
+                          <td className="p-3.5 space-y-0.5">
+                            <p className="font-bold text-emerald-400">₹{record.amountPaid ?? record.finalPayableAmount ?? 0}</p>
+                            <p className="text-[10px] text-zinc-400">{record.paymentMethod || 'UPI'}</p>
+                          </td>
+
+                          {/* Status */}
+                          <td className="p-3.5">
+                            {isApproved && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>Approved</span>
+                              </span>
+                            )}
+                            {isPending && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                                <Clock className="w-3 h-3 animate-pulse" />
+                                <span>Pending Verification</span>
+                              </span>
+                            )}
+                            {isRejected && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/30">
+                                <AlertCircle className="w-3 h-3" />
+                                <span>Rejected</span>
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Actions */}
+                          <td className="p-3.5 text-right space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedReceiptRecord(record)}
+                              className="px-2.5 py-1.5 bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 rounded-lg text-[11px] font-mono transition-colors cursor-pointer inline-flex items-center gap-1"
+                              title="View Official Receipt"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Receipt</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => downloadFeeReceiptPDF(record, settings)}
+                              className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-white/10 rounded-lg text-[11px] font-mono transition-colors cursor-pointer inline-flex items-center gap-1"
+                              title="Download Receipt PDF"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">PDF</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MEMBER VERIFICATION & PAY FEE TAB VIEW */}
+      {activePortalTab === 'pay' && (
+        <>
+          {/* Member Verification Card */}
+          <div className="bg-[#0A0A0A] border border-white/10 p-6 sm:p-8 rounded-3xl space-y-6 shadow-xl">
         <div className="flex items-center justify-between border-b border-white/10 pb-3">
           <div className="flex items-center gap-2 text-xs font-mono font-bold text-white uppercase tracking-wider">
             <ShieldCheck className="w-4 h-4 text-[#2563EB]" />
@@ -1138,14 +1553,31 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                 </button>
               </div>
             ) : feeHistoryRecords.length === 0 ? (
-              <div className="p-6 text-center bg-zinc-950 rounded-xl border border-zinc-800/80 space-y-2">
-                <Receipt className="w-8 h-8 text-zinc-600 mx-auto" />
-                <p className="text-xs text-zinc-400 font-mono">
-                  No previous fee payment records found for this member.
-                </p>
-                <p className="text-[11px] text-zinc-500 font-sans">
-                  Use the form below to submit a new membership fee payment.
-                </p>
+              <div className="p-6 text-center bg-zinc-950/90 rounded-2xl border border-zinc-800/90 space-y-3.5 shadow-lg">
+                <div className="w-12 h-12 bg-blue-500/10 border border-blue-500/20 rounded-full flex items-center justify-center mx-auto text-blue-400">
+                  <Receipt className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-zinc-200 font-mono uppercase tracking-tight">
+                    No previous fee payment records found for this member.
+                  </p>
+                  <p className="text-xs text-zinc-400 font-sans max-w-md mx-auto leading-relaxed">
+                    Use the form below to submit a new membership fee payment.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = document.getElementById('pay-fee-form-section');
+                    if (el) {
+                      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs font-mono uppercase tracking-wider rounded-xl shadow-md shadow-blue-600/30 transition-all cursor-pointer inline-flex items-center gap-2 mt-1"
+                >
+                  <span>Proceed to Pay Membership Fee</span>
+                  <span>&darr;</span>
+                </button>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -1253,37 +1685,122 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
             )}
           </div>
 
-          {/* Pay Fee Form */}
-          <form onSubmit={handlePaySubmit} className="space-y-6">
-            {/* Visual Loading Indicator during Fee Submission */}
-            {isSubmitting && (
-              <div className="p-4 bg-gradient-to-r from-blue-950/90 via-zinc-900 to-blue-950/90 border border-blue-500/50 rounded-2xl flex items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2 shadow-xl shadow-blue-500/20">
-                <div className="flex items-center gap-3.5">
-                  <div className="relative flex items-center justify-center shrink-0">
-                    <div className="w-10 h-10 rounded-full border-2 border-blue-500/30 border-t-blue-500 animate-spin" />
-                    <Loader2 className="w-5 h-5 text-blue-400 animate-spin absolute" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-white uppercase font-mono tracking-wider flex items-center gap-2">
-                      <span>Processing Fee Payment...</span>
-                      <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-ping" />
-                    </h4>
-                    <p className="text-xs text-zinc-300 font-sans mt-0.5">
-                      Submitting payment details & recording transaction. Please wait.
-                    </p>
-                  </div>
-                </div>
-                <div className="hidden sm:flex items-center gap-2 bg-blue-500/10 border border-blue-500/30 px-3 py-1.5 rounded-lg">
-                  <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin" />
-                  <span className="text-[11px] font-mono text-blue-400 font-bold uppercase">API Request Active</span>
-                </div>
+          {/* Pay Fee Form or Blocking Banner */}
+          {isLoadingFeeHistory ? (
+            <div id="pay-fee-form-section" className="p-8 bg-zinc-950/80 border border-zinc-800/80 rounded-2xl space-y-4 animate-pulse shadow-xl">
+              <div className="flex items-center gap-3 text-blue-400 font-mono text-xs font-bold uppercase tracking-wider">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+                <span>Checking Fee History & Eligibility...</span>
               </div>
-            )}
+              <div className="h-4 bg-zinc-800/80 rounded w-1/2" />
+              <div className="h-12 bg-zinc-900/80 rounded-xl" />
+              <div className="h-12 bg-zinc-900/80 rounded-xl" />
+            </div>
+          ) : !canSubmitNewPayment ? (
+            <div id="pay-fee-form-section" className="space-y-4">
+              {blockingReason === 'PAYMENT_ALREADY_SUCCESSFUL' && (
+                <div className="p-6 bg-gradient-to-r from-emerald-950/90 via-zinc-900 to-emerald-950/90 border-2 border-emerald-500/60 rounded-2xl space-y-3 shadow-2xl">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0 text-emerald-400">
+                      <CheckCircle2 className="w-7 h-7" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="text-xl font-black text-white font-mono uppercase tracking-tight">
+                        Membership Fee Already Paid
+                      </h3>
+                      <p className="text-sm text-emerald-200/90 font-medium leading-relaxed font-sans">
+                        Your membership fee for this period has already been received successfully. No further payment is required.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
-            <h3 className="text-sm font-bold text-white uppercase font-mono tracking-wider border-b border-zinc-800 pb-2 text-blue-400 flex items-center gap-2">
-              <Receipt className="w-4 h-4" />
-              <span>FEE PAYMENT DETAILS</span>
-            </h3>
+              {blockingReason === 'PAYMENT_PENDING_VERIFICATION' && (
+                <div className="p-6 bg-gradient-to-r from-amber-950/90 via-zinc-900 to-amber-950/90 border-2 border-amber-500/60 rounded-2xl space-y-3 shadow-2xl">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 text-amber-400">
+                      <Clock className="w-7 h-7 animate-pulse" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="text-xl font-black text-white font-mono uppercase tracking-tight">
+                        Payment Already Submitted
+                      </h3>
+                      <p className="text-sm text-amber-200/90 font-medium leading-relaxed font-sans">
+                        Your fee payment has already been submitted and is awaiting admin verification. Please do not make another payment.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(blockingReason === 'HISTORY_UNAVAILABLE' || historyError) && (
+                <div className="p-6 bg-gradient-to-r from-red-950/90 via-zinc-900 to-red-950/90 border-2 border-red-500/60 rounded-2xl space-y-3 shadow-2xl">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center shrink-0 text-red-400">
+                      <AlertTriangle className="w-7 h-7" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="text-xl font-black text-white font-mono uppercase tracking-tight">
+                        Fee History Temporarily Unavailable
+                      </h3>
+                      <p className="text-sm text-red-200/90 font-medium leading-relaxed font-sans">
+                        Fee history is temporarily unavailable. Please try again before making a payment.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => fetchFeeHistory(verifiedRollNumber, verifiedRegistrationRef)}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold text-xs font-mono uppercase tracking-wider rounded-xl shadow-md transition-all cursor-pointer inline-flex items-center gap-2 mt-2"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Retry Verification</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <form id="pay-fee-form-section" onSubmit={handlePaySubmit} className="space-y-6">
+              {/* Visual Loading Indicator during Fee Submission */}
+              {isSubmitting && (
+                <div className="p-4 bg-gradient-to-r from-blue-950/90 via-zinc-900 to-blue-950/90 border border-blue-500/50 rounded-2xl flex items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2 shadow-xl shadow-blue-500/20">
+                  <div className="flex items-center gap-3.5">
+                    <div className="relative flex items-center justify-center shrink-0">
+                      <div className="w-10 h-10 rounded-full border-2 border-blue-500/30 border-t-blue-500 animate-spin" />
+                      <Loader2 className="w-5 h-5 text-blue-400 animate-spin absolute" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white uppercase font-mono tracking-wider flex items-center gap-2">
+                        <span>Processing Fee Payment...</span>
+                        <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-ping" />
+                      </h4>
+                      <p className="text-xs text-zinc-300 font-sans mt-0.5">
+                        Submitting payment details & recording transaction. Please wait.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="hidden sm:flex items-center gap-2 bg-blue-500/10 border border-blue-500/30 px-3 py-1.5 rounded-lg">
+                    <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin" />
+                    <span className="text-[11px] font-mono text-blue-400 font-bold uppercase">API Request Active</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Previous Payment Rejected Warning */}
+              {blockingReason === 'PREVIOUS_PAYMENT_REJECTED' && (
+                <div className="p-4 bg-red-950/60 border border-red-500/50 rounded-2xl flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
+                  <p className="text-xs text-red-200 font-bold font-sans">
+                    Your previous payment was rejected. Please review the details and submit again.
+                  </p>
+                </div>
+              )}
+
+              <h3 className="text-sm font-bold text-white uppercase font-mono tracking-wider border-b border-zinc-800 pb-2 text-blue-400 flex items-center gap-2">
+                <Receipt className="w-4 h-4" />
+                <span>FEE PAYMENT DETAILS</span>
+              </h3>
 
             {/* Special Offer Badge / Notice */}
             {isSpecialOfferActive && (
@@ -1823,7 +2340,10 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
               )}
             </button>
           </form>
+        )}
         </div>
+      )}
+        </>
       )}
 
       {/* Fee Payment Receipt Modal */}

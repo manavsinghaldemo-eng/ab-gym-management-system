@@ -126,9 +126,9 @@ export const AdminRegistrations: React.FC<AdminRegistrationsProps> = ({
   const [successId, setSuccessId] = useState<string | null>(null);
 
   const filteredRegistrations = registrations.filter((reg) => {
-    const refNum = (reg.registrationReferenceNumber || reg.registrationRef || '').toLowerCase();
-    const name = (reg.fullName || '').toLowerCase();
-    const phone = (reg.phoneNumber || reg.phone || '').toLowerCase();
+    const refNum = String(reg.registrationReferenceNumber || reg.registrationRef || '').toLowerCase();
+    const name = String(reg.fullName || '').toLowerCase();
+    const phone = String(reg.phoneNumber || reg.phone || '').toLowerCase();
     const matchesSearch =
       refNum.includes(searchTerm.toLowerCase()) ||
       name.includes(searchTerm.toLowerCase()) ||
@@ -166,26 +166,35 @@ export const AdminRegistrations: React.FC<AdminRegistrationsProps> = ({
     <div className="space-y-6">
       {/* Header Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-900 p-4 rounded-xl border border-zinc-800">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search by Ref #, Name, or Phone..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-8 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-all"
-          />
-          {searchTerm && (
-            <button
-              type="button"
-              onClick={() => setSearchTerm('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer p-0.5"
-              title="Clear search"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
+        <form onSubmit={(e) => e.preventDefault()} className="relative flex-1 flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search by Ref #, Name, or Phone..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-8 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-all"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer p-0.5"
+                title="Clear search"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <button
+            type="submit"
+            className="px-3.5 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Search</span>
+          </button>
+        </form>
 
         <div className="flex items-center gap-2">
           {['All', 'Pending Verification', 'Approved', 'Rejected'].map((status) => (

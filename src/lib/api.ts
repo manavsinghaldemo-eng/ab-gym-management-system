@@ -18,6 +18,7 @@ import {
   logAdminActivity,
   getMemberForFee as getMemberForFeeStorage,
   getMemberFeeHistory as getMemberFeeHistoryStorage,
+  evaluateFeePaymentBlockingStorage,
 } from './storage';
 
 import { GOOGLE_APPS_SCRIPT_URL, callABFitnessBackend } from './config';
@@ -842,7 +843,7 @@ export const apiService = {
 
   // 2. Public Registration
   submitRegistration: (data: any) => {
-    const cleanPhone = (data.phoneNumber || data.phone || '').replace(/\D/g, '');
+    const cleanPhone = String(data.phoneNumber || data.phone || '').replace(/\D/g, '');
     const payload = {
       fullName: data.fullName || '',
       gender: data.gender || 'Male',
@@ -939,7 +940,7 @@ export const apiService = {
   },
 
   // 5b. Get Member Fee History
-  getMemberFeeHistory: (data: {
+  getMemberFeeHistory: async (data: {
     rollNumber?: string;
     registrationReferenceNumber?: string;
     registrationRef?: string;
@@ -960,23 +961,130 @@ export const apiService = {
       dateOfBirth: data.dateOfBirth || '',
       ...data,
     };
-    return callGoogleAppsScript('getMemberFeeHistory', payload);
+
+    try {
+      let res: any = await callGoogleAppsScript('getMemberFeeHistory', payload);
+
+      if (res && res.success !== false) {
+        const gasList: FeePaymentRecord[] = res.history || res.records || res.data || [];
+        const localResult = getMemberFeeHistoryStorage(payload);
+        const localList: FeePaymentRecord[] = localResult?.history || [];
+
+        const mergedMap = new Map<string, FeePaymentRecord>();
+        if (Array.isArray(gasList)) {
+          gasList.forEach((item) => {
+            const key = item.feeReferenceNumber || item.id || Math.random().toString();
+            mergedMap.set(key, item);
+          });
+        }
+        if (Array.isArray(localList)) {
+          localList.forEach((item) => {
+            const key = item.feeReferenceNumber || item.id || Math.random().toString();
+            if (!mergedMap.has(key)) {
+              mergedMap.set(key, item);
+            }
+          });
+        }
+
+        const mergedHistory = Array.from(mergedMap.values());
+        mergedHistory.sort((a, b) => {
+          const dateA = new Date(a.paymentDate || a.createdDate || a.createdAt || a.timestamp || 0).getTime();
+          const dateB = new Date(b.paymentDate || b.createdDate || b.createdAt || b.timestamp || 0).getTime();
+          return dateB - dateA;
+        });
+
+        const evalRes = evaluateFeePaymentBlockingStorage(mergedHistory);
+        return {
+          success: true,
+          code: res.code || 'FEE_HISTORY_FOUND',
+          history: mergedHistory,
+          records: mergedHistory,
+          data: mergedHistory,
+          canSubmitNewPayment: res.canSubmitNewPayment !== undefined ? res.canSubmitNewPayment : evalRes.canSubmitNewPayment,
+          blockingReason: res.blockingReason || evalRes.blockingReason,
+          message: res.message || `${mergedHistory.length} payment records found.`,
+        };
+      }
+
+      // If backend returned invalid/unknown action error, try fallback action getFeePayments
+      if (res && res.message && typeof res.message === 'string' && (res.message.includes('Invalid action') || res.message.includes('Unknown action'))) {
+        try {
+          const fallbackRes: any = await callGoogleAppsScript('getFeePayments', { ...payload, action: 'getFeePayments' });
+          if (fallbackRes && fallbackRes.success !== false) {
+            const allRecs = fallbackRes.records || fallbackRes.data || fallbackRes.history || [];
+            if (Array.isArray(allRecs)) {
+              const matched = allRecs.filter((r: any) => {
+                const rRoll = (r.rollNumber || '').trim().toUpperCase();
+                const rReg = (r.registrationReferenceNumber || r.registrationRef || '').trim().toUpperCase();
+                const rFee = (r.feeReferenceNumber || '').trim().toUpperCase();
+                return (roll !== '' && rRoll === roll) || (regRef !== '' && rReg === regRef) || (roll !== '' && rFee === roll) || (regRef !== '' && rFee === regRef);
+              });
+
+              const localResult = getMemberFeeHistoryStorage(payload);
+              const localList: FeePaymentRecord[] = localResult?.history || [];
+              const mergedMap = new Map<string, FeePaymentRecord>();
+              matched.forEach((item: any) => {
+                const key = item.feeReferenceNumber || item.id || Math.random().toString();
+                mergedMap.set(key, item);
+              });
+              localList.forEach((item: FeePaymentRecord) => {
+                const key = item.feeReferenceNumber || item.id || Math.random().toString();
+                if (!mergedMap.has(key)) {
+                  mergedMap.set(key, item);
+                }
+              });
+              const mergedHistory = Array.from(mergedMap.values());
+
+              const evalRes = evaluateFeePaymentBlockingStorage(mergedHistory);
+              return {
+                success: true,
+                code: 'FEE_HISTORY_FOUND',
+                history: mergedHistory,
+                records: mergedHistory,
+                data: mergedHistory,
+                canSubmitNewPayment: evalRes.canSubmitNewPayment,
+                blockingReason: evalRes.blockingReason,
+                message: `${mergedHistory.length} payment records found.`
+              };
+            }
+          }
+        } catch (fbErr) {
+          console.warn("Fallback getFeePayments call error:", fbErr);
+        }
+      }
+
+      // Fallback to local storage matching records
+      const localResult = getMemberFeeHistoryStorage(payload);
+      if (localResult) {
+        return localResult;
+      }
+    } catch (err: any) {
+      console.warn("getMemberFeeHistory error, using local storage fallback:", err);
+      const localResult = getMemberFeeHistoryStorage(payload);
+      if (localResult) {
+        return localResult;
+      }
+    }
+
+    const localResult = getMemberFeeHistoryStorage(payload);
+    if (localResult) {
+      return localResult;
+    }
+
+    return {
+      success: true,
+      code: 'NO_FEE_HISTORY',
+      history: [],
+      records: [],
+      data: [],
+      canSubmitNewPayment: true,
+      blockingReason: 'NO_BLOCKING_PAYMENT',
+      message: 'No fee payment records found.'
+    };
   },
 
-  getMemberPaymentHistory: (data: any) => {
-    const roll = (data.rollNumber || '').trim().toUpperCase();
-    const regRef = (data.registrationReferenceNumber || data.registrationRef || '').trim().toUpperCase();
-    const payload = {
-      action: 'getMemberFeeHistory',
-      rollNumber: roll,
-      registrationReferenceNumber: regRef,
-      registrationRef: regRef,
-      referenceOrRollNumber: data.referenceOrRollNumber || roll || regRef,
-      phoneFirst4: data.phoneFirst4 || '',
-      dateOfBirth: data.dateOfBirth || '',
-      ...data,
-    };
-    return callGoogleAppsScript('getMemberFeeHistory', payload);
+  getMemberPaymentHistory: async (data: any) => {
+    return apiService.getMemberFeeHistory(data);
   },
 
   // 6. Submit Fee Payment
@@ -1189,6 +1297,12 @@ export const apiService = {
       action: "adminSubmitFeePayment",
       token: localStorage.getItem("abFitnessAdminToken") || getSavedAdminToken(),
       referenceOrRollNumber: (formData.referenceOrRollNumber || '').trim(),
+      memberName: (formData.memberName || formData.fullName || '').trim(),
+      fullName: (formData.fullName || formData.memberName || '').trim(),
+      phone: (formData.phone || formData.phoneNumber || '').trim(),
+      phoneNumber: (formData.phoneNumber || formData.phone || '').trim(),
+      email: (formData.email || formData.emailAddress || '').trim(),
+      emailAddress: (formData.emailAddress || formData.email || '').trim(),
       selectedPlan: formData.selectedPlan || '',
       feeDuration: formData.feeDuration || '1 Month',
       feeCalculationMode: formData.feeCalculationMode || 'Auto Calculate',

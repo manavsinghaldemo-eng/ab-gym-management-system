@@ -54,6 +54,8 @@ import {
   Database,
   Plus,
   QrCode,
+  History,
+  ArrowUpDown,
 } from 'lucide-react';
 
 const getRegistrationReference = (registration: any) =>
@@ -66,19 +68,19 @@ const getRegistrationReference = (registration: any) =>
 
 const normalizeRegistration = (record: any, idx: number): RegistrationRequest => {
   if (!record) return {} as RegistrationRequest;
-  const regRef = record['Registration Reference Number'] ?? record['registrationReferenceNumber'] ?? record['registrationRef'] ?? record['id'] ?? `reg-${record['rowNumber'] || idx + 1}`;
-  const roll = record['Roll Number'] ?? record['rollNumber'] ?? record['rollNo'] ?? 'Unassigned';
-  const name = record['Full Name'] ?? record['fullName'] ?? record['name'] ?? record['memberName'] ?? 'Gym Athlete';
-  const phone = record['Phone Number'] ?? record['phoneNumber'] ?? record['phone'] ?? record['memberPhone'] ?? '';
-  const email = record['Email Address'] ?? record['emailAddress'] ?? record['email'] ?? record['memberEmail'] ?? '';
-  const dob = record['Date of Birth'] ?? record['dateOfBirth'] ?? record['dob'] ?? '';
-  const plan = record['Selected Plan'] ?? record['selectedPlan'] ?? record['planName'] ?? record['membershipPlan'] ?? 'Basic Plan';
-  const status = record['Registration Status'] ?? record['registrationStatus'] ?? record['status'] ?? 'Pending Verification';
-  const remarks = record['Admin Remarks'] ?? record['adminRemarks'] ?? record['remarks'] ?? record['notes'] ?? '';
-  const emergency = record['Emergency Contact Number'] ?? record['emergencyContactNumber'] ?? record['emergencyContact'] ?? '';
-  const upiId = record['UPI Transaction ID'] ?? record['upiTransactionId'] ?? record['upiTxnId'] ?? '';
-  const upiUrl = record['Payment Screenshot'] ?? record['paymentScreenshot'] ?? record['upiScreenshotUrl'] ?? '';
-  const ts = record['Timestamp'] ?? record['timestamp'] ?? record['createdAt'] ?? new Date().toISOString();
+  const regRef = String(record['Registration Reference Number'] ?? record['registrationReferenceNumber'] ?? record['registrationRef'] ?? record['id'] ?? `reg-${record['rowNumber'] || idx + 1}`);
+  const roll = String(record['Roll Number'] ?? record['rollNumber'] ?? record['rollNo'] ?? 'Unassigned');
+  const name = String(record['Full Name'] ?? record['fullName'] ?? record['name'] ?? record['memberName'] ?? 'Gym Athlete');
+  const phone = String(record['Phone Number'] ?? record['phoneNumber'] ?? record['phone'] ?? record['memberPhone'] ?? '');
+  const email = String(record['Email Address'] ?? record['emailAddress'] ?? record['email'] ?? record['memberEmail'] ?? '');
+  const dob = String(record['Date of Birth'] ?? record['dateOfBirth'] ?? record['dob'] ?? '');
+  const plan = String(record['Selected Plan'] ?? record['selectedPlan'] ?? record['planName'] ?? record['membershipPlan'] ?? 'Basic Plan');
+  const status = String(record['Registration Status'] ?? record['registrationStatus'] ?? record['status'] ?? 'Pending Verification');
+  const remarks = String(record['Admin Remarks'] ?? record['adminRemarks'] ?? record['remarks'] ?? record['notes'] ?? '');
+  const emergency = String(record['Emergency Contact Number'] ?? record['emergencyContactNumber'] ?? record['emergencyContact'] ?? '');
+  const upiId = String(record['UPI Transaction ID'] ?? record['upiTransactionId'] ?? record['upiTxnId'] ?? '');
+  const upiUrl = String(record['Payment Screenshot'] ?? record['paymentScreenshot'] ?? record['upiScreenshotUrl'] ?? '');
+  const ts = String(record['Timestamp'] ?? record['timestamp'] ?? record['createdAt'] ?? new Date().toISOString());
 
   return {
     ...record,
@@ -97,15 +99,15 @@ const normalizeRegistration = (record: any, idx: number): RegistrationRequest =>
     phone: phone,
     emailAddress: email,
     email: email,
-    address: record['Address'] ?? record['address'] ?? '',
+    address: String(record['Address'] ?? record['address'] ?? ''),
     emergencyContactNumber: emergency,
     emergencyContact: emergency,
     selectedPlan: plan,
     planName: plan,
-    fitnessGoal: record['Fitness Goal'] ?? record['fitnessGoal'] ?? '',
-    joiningDate: record['Joining Date'] ?? record['joiningDate'] ?? record['joinDate'] ?? '',
+    fitnessGoal: String(record['Fitness Goal'] ?? record['fitnessGoal'] ?? ''),
+    joiningDate: String(record['Joining Date'] ?? record['joiningDate'] ?? record['joinDate'] ?? ''),
     registrationFee: Number(record['Registration Fee'] ?? record['registrationFee'] ?? 500),
-    paymentMethod: record['Payment Method'] ?? record['paymentMethod'] ?? 'UPI',
+    paymentMethod: String(record['Payment Method'] ?? record['paymentMethod'] ?? 'UPI'),
     upiTransactionId: upiId,
     upiTxnId: upiId,
     paymentScreenshot: upiUrl,
@@ -128,15 +130,15 @@ const normalizeRegistration = (record: any, idx: number): RegistrationRequest =>
 
 const normalizeMember = (record: any, idx: number): Member => {
   if (!record) return {} as Member;
-  const roll = record['Roll Number'] ?? record['rollNumber'] ?? record['rollNo'] ?? record['id'] ?? `ABG-2026-${String(idx + 1).padStart(3, '0')}`;
-  const name = record['Full Name'] ?? record['fullName'] ?? record['name'] ?? record['memberName'] ?? 'Gym Member';
-  const phone = record['Phone Number'] ?? record['phoneNumber'] ?? record['phone'] ?? record['memberPhone'] ?? '';
-  const email = record['Email Address'] ?? record['emailAddress'] ?? record['email'] ?? record['memberEmail'] ?? '';
-  const dob = record['Date of Birth'] ?? record['dateOfBirth'] ?? record['dob'] ?? '';
-  const plan = record['Membership Plan'] ?? record['membershipPlan'] ?? record['selectedPlan'] ?? record['planName'] ?? 'Monthly Gold Plan';
-  const status = record['Membership Status'] ?? record['membershipStatus'] ?? record['status'] ?? 'Active';
-  const emergency = record['Emergency Contact Number'] ?? record['emergencyContactNumber'] ?? record['emergencyContact'] ?? '';
-  const regRef = record['Registration Reference Number'] ?? record['registrationReferenceNumber'] ?? record['registrationRef'] ?? '';
+  const roll = String(record['Roll Number'] ?? record['rollNumber'] ?? record['rollNo'] ?? record['id'] ?? `ABG-2026-${String(idx + 1).padStart(3, '0')}`);
+  const name = String(record['Full Name'] ?? record['fullName'] ?? record['name'] ?? record['memberName'] ?? 'Gym Member');
+  const phone = String(record['Phone Number'] ?? record['phoneNumber'] ?? record['phone'] ?? record['memberPhone'] ?? '');
+  const email = String(record['Email Address'] ?? record['emailAddress'] ?? record['email'] ?? record['memberEmail'] ?? '');
+  const dob = String(record['Date of Birth'] ?? record['dateOfBirth'] ?? record['dob'] ?? '');
+  const plan = String(record['Membership Plan'] ?? record['membershipPlan'] ?? record['selectedPlan'] ?? record['planName'] ?? 'Monthly Gold Plan');
+  const status = String(record['Membership Status'] ?? record['membershipStatus'] ?? record['status'] ?? 'Active');
+  const emergency = String(record['Emergency Contact Number'] ?? record['emergencyContactNumber'] ?? record['emergencyContact'] ?? '');
+  const regRef = String(record['Registration Reference Number'] ?? record['registrationReferenceNumber'] ?? record['registrationRef'] ?? '');
 
   return {
     ...record,
@@ -149,39 +151,141 @@ const normalizeMember = (record: any, idx: number): Member => {
     phoneNumber: phone,
     email: email,
     emailAddress: email,
-    gender: record['Gender'] ?? record['gender'] ?? 'Male',
+    gender: String(record['Gender'] ?? record['gender'] ?? 'Male'),
     dob: dob,
     dateOfBirth: dob,
     membershipPlan: plan,
     selectedPlan: plan,
     status: status,
     membershipStatus: status,
-    joinDate: record['Join Date'] ?? record['joinDate'] ?? record['joiningDate'] ?? new Date().toISOString().split('T')[0],
-    expiryDate: record['Expiry Date'] ?? record['expiryDate'] ?? '',
+    joinDate: String(record['Join Date'] ?? record['joinDate'] ?? record['joiningDate'] ?? new Date().toISOString().split('T')[0]),
+    expiryDate: String(record['Expiry Date'] ?? record['expiryDate'] ?? ''),
     emergencyContact: emergency,
     emergencyContactNumber: emergency,
-    address: record['Address'] ?? record['address'] ?? '',
-    bloodGroup: record['Blood Group'] ?? record['bloodGroup'] ?? '',
-    photoUrl: record['Photo URL'] ?? record['photoUrl'] ?? '',
+    address: String(record['Address'] ?? record['address'] ?? ''),
+    bloodGroup: String(record['Blood Group'] ?? record['bloodGroup'] ?? ''),
+    photoUrl: String(record['Photo URL'] ?? record['photoUrl'] ?? ''),
     registrationReferenceNumber: regRef,
     registrationRef: regRef,
   };
 };
 
-const normalizeFeePayment = (record: any, idx: number): FeePaymentRecord => {
+export const resolveFeeMemberName = (
+  record: any,
+  membersList?: Member[],
+  regsList?: RegistrationRequest[]
+): string => {
+  if (!record) return 'Gym Member';
+
+  const rawName = String(
+    record['Member Name'] ??
+    record['memberName'] ??
+    record['Full Name'] ??
+    record['fullName'] ??
+    record['Name'] ??
+    record['name'] ??
+    ''
+  ).trim();
+
+  const isGeneric =
+    !rawName ||
+    rawName.toLowerCase() === 'gym member' ||
+    rawName.toLowerCase() === 'gym athlete' ||
+    rawName.toLowerCase() === 'member' ||
+    rawName.toLowerCase() === 'unassigned' ||
+    rawName.toLowerCase() === 'n/a' ||
+    rawName.toLowerCase() === 'null' ||
+    rawName.toLowerCase() === 'undefined';
+
+  if (!isGeneric) {
+    return rawName;
+  }
+
+  const roll = String(
+    record['Roll Number'] ?? record['rollNumber'] ?? record['rollNo'] ?? ''
+  ).trim().toUpperCase();
+
+  const regRef = String(
+    record['Registration Reference Number'] ??
+    record['registrationReferenceNumber'] ??
+    record['registrationRef'] ??
+    ''
+  ).trim().toUpperCase();
+
+  const phone = String(
+    record['Phone Number'] ?? record['phoneNumber'] ?? record['memberPhone'] ?? record['phone'] ?? ''
+  ).trim();
+
+  if (membersList && membersList.length > 0) {
+    const found = membersList.find((m) => {
+      const mRoll = ((m.rollNumber || (m as any).rollNo || m.id || '') as string).trim().toUpperCase();
+      const mReg = ((((m as any).registrationReferenceNumber || m.registrationRef || '') as string)).trim().toUpperCase();
+      const mPhone = ((m.phone || (m as any).phoneNumber || '') as string).trim();
+      return (
+        (roll !== '' && roll !== 'UNASSIGNED' && mRoll === roll) ||
+        (regRef !== '' && mReg === regRef) ||
+        (phone !== '' && mPhone !== '' && mPhone === phone)
+      );
+    });
+    if (found) {
+      const mName = (found.fullName || (found as any).name || '').trim();
+      if (
+        mName &&
+        mName.toLowerCase() !== 'gym member' &&
+        mName.toLowerCase() !== 'gym athlete' &&
+        mName.toLowerCase() !== 'member'
+      ) {
+        return mName;
+      }
+    }
+  }
+
+  if (regsList && regsList.length > 0) {
+    const found = regsList.find((r) => {
+      const rReg = ((r.registrationReferenceNumber || r.registrationRef || r.id || '') as string).trim().toUpperCase();
+      const rRoll = ((r.rollNumber || '') as string).trim().toUpperCase();
+      const rPhone = ((r.phone || (r as any).phoneNumber || '') as string).trim();
+      return (
+        (regRef !== '' && rReg === regRef) ||
+        (roll !== '' && roll !== 'UNASSIGNED' && rRoll === roll) ||
+        (phone !== '' && rPhone !== '' && rPhone === phone)
+      );
+    });
+    if (found) {
+      const rName = (found.fullName || (found as any).name || '').trim();
+      if (
+        rName &&
+        rName.toLowerCase() !== 'gym member' &&
+        rName.toLowerCase() !== 'gym athlete' &&
+        rName.toLowerCase() !== 'member'
+      ) {
+        return rName;
+      }
+    }
+  }
+
+  return !isGeneric ? rawName : 'Gym Member';
+};
+
+const normalizeFeePayment = (
+  record: any,
+  idx: number,
+  allMembers?: Member[],
+  allRegs?: RegistrationRequest[]
+): FeePaymentRecord => {
   if (!record) return {} as FeePaymentRecord;
-  const feeRef = record['Fee Reference Number'] ?? record['feeReferenceNumber'] ?? record['feeRef'] ?? record['id'] ?? `fee-${record['rowNumber'] || idx + 1}`;
-  const regRef = record['Registration Reference Number'] ?? record['registrationReferenceNumber'] ?? record['registrationRef'] ?? '';
-  const roll = record['Roll Number'] ?? record['rollNumber'] ?? record['rollNo'] ?? 'Unassigned';
-  const name = record['Member Name'] ?? record['memberName'] ?? record['fullName'] ?? record['name'] ?? 'Gym Member';
-  const phone = record['Phone Number'] ?? record['phoneNumber'] ?? record['memberPhone'] ?? record['phone'] ?? '';
-  const email = record['Email Address'] ?? record['emailAddress'] ?? record['memberEmail'] ?? record['email'] ?? '';
-  const plan = record['Selected Plan'] ?? record['selectedPlan'] ?? record['planName'] ?? record['membershipPlan'] ?? 'Basic Plan';
-  const status = record['Payment Status'] ?? record['paymentStatus'] ?? record['status'] ?? 'Pending Verification';
-  const remarks = record['Notes'] ?? record['notes'] ?? record['remarks'] ?? record['adminRemarks'] ?? '';
-  const upiId = record['UPI Transaction ID'] ?? record['upiTransactionId'] ?? record['upiTxnId'] ?? '';
-  const upiUrl = record['Payment Screenshot'] ?? record['paymentScreenshot'] ?? record['upiScreenshotUrl'] ?? '';
-  const ts = record['Timestamp'] ?? record['timestamp'] ?? record['createdAt'] ?? new Date().toISOString();
+  const feeRef = String(record['Fee Reference Number'] ?? record['feeReferenceNumber'] ?? record['feeRef'] ?? record['id'] ?? `fee-${record['rowNumber'] || idx + 1}`);
+  const regRef = String(record['Registration Reference Number'] ?? record['registrationReferenceNumber'] ?? record['registrationRef'] ?? '');
+  const roll = String(record['Roll Number'] ?? record['rollNumber'] ?? record['rollNo'] ?? 'Unassigned');
+  const name = resolveFeeMemberName(record, allMembers, allRegs);
+  const phone = String(record['Phone Number'] ?? record['phoneNumber'] ?? record['memberPhone'] ?? record['phone'] ?? '');
+  const email = String(record['Email Address'] ?? record['emailAddress'] ?? record['memberEmail'] ?? record['email'] ?? '');
+  const plan = String(record['Selected Plan'] ?? record['selectedPlan'] ?? record['planName'] ?? record['membershipPlan'] ?? 'Basic Plan');
+  const status = String(record['Payment Status'] ?? record['paymentStatus'] ?? record['status'] ?? 'Pending Verification');
+  const remarks = String(record['Notes'] ?? record['notes'] ?? record['remarks'] ?? record['adminRemarks'] ?? '');
+  const upiId = String(record['UPI Transaction ID'] ?? record['upiTransactionId'] ?? record['upiTxnId'] ?? '');
+  const upiUrl = String(record['Payment Screenshot'] ?? record['paymentScreenshot'] ?? record['upiScreenshotUrl'] ?? '');
+  const ts = String(record['Timestamp'] ?? record['timestamp'] ?? record['createdAt'] ?? new Date().toISOString());
   const amt = Number(record['Amount Paid'] ?? record['amountPaid'] ?? record['Current Fee Amount'] ?? record['currentFeeAmount'] ?? record['amount'] ?? 0);
 
   return {
@@ -391,6 +495,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     if (path.includes('/admin/registrations')) return 'registrations';
     if (path.includes('/admin/members')) return 'members';
     if (path.includes('/admin/fee-records')) return 'fee-records';
+    if (path.includes('/admin/payment-history')) return 'payment-history';
     return 'dashboard';
   };
 
@@ -428,6 +533,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
   const [feeSearch, setFeeSearch] = useState('');
   const [feeStatusFilter, setFeeStatusFilter] = useState('All Statuses');
+
+  // Payment History Filters & Sorting
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyStatusFilter, setHistoryStatusFilter] = useState('All');
+  const [historyMethodFilter, setHistoryMethodFilter] = useState('All');
+  const [historySortOrder, setHistorySortOrder] = useState<'newest' | 'oldest'>('newest');
 
   // Modals & Interactivity
   const [screenshotModalUrl, setScreenshotModalUrl] = useState<string | null>(null);
@@ -620,11 +731,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       console.log('Mapped records:', mappedRecords);
       setRegistrations(mappedRecords);
 
+      const parsedMembers: Member[] = (memRes && memRes.success !== false)
+        ? ((memRes as any)?.data?.records ?? (Array.isArray((memRes as any)?.data) ? (memRes as any).data : ((memRes as any)?.records ?? []))).map((m: any, idx: number) => normalizeMember(m, idx))
+        : [];
+      setMembers(parsedMembers);
+
       // Process & Map Fee Payments
       console.log("Raw fee response:", feeRes);
 
       const rawFeeRecords = (feeRes as any)?.data?.records ?? (Array.isArray((feeRes as any)?.data) ? (feeRes as any).data : ((feeRes as any)?.records ?? []));
-      const mappedFeeRecords = (Array.isArray(rawFeeRecords) ? rawFeeRecords : []).map((record: any, idx: number) => normalizeFeePayment(record, idx));
+      const mappedFeeRecords = (Array.isArray(rawFeeRecords) ? rawFeeRecords : []).map((record: any, idx: number) => normalizeFeePayment(record, idx, parsedMembers, mappedRecords));
       console.log("Mapped fee records:", mappedFeeRecords);
       setFeePayments(mappedFeeRecords);
 
@@ -632,12 +748,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
         setStats(dashRes.data.stats);
       } else {
         setStats({ activeMembers: 0, totalRegistrations: 0, pendingRegistrations: 0, totalCollections: 0 });
-      }
-      if (memRes && memRes.success !== false) {
-        const memData = (memRes as any)?.data?.records ?? (Array.isArray((memRes as any)?.data) ? (memRes as any).data : ((memRes as any)?.records ?? []));
-        setMembers((Array.isArray(memData) ? memData : []).map((m: any, idx: number) => normalizeMember(m, idx)));
-      } else {
-        setMembers([]);
       }
       if (logRes && logRes.success !== false) {
         const logData = (logRes as any)?.data?.records ?? (Array.isArray((logRes as any)?.data) ? (logRes as any).data : ((logRes as any)?.records ?? []));
@@ -662,6 +772,27 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       hasLoadedRef.current = false;
     }
   }, [isAuthenticated, loadLiveData]);
+
+  useEffect(() => {
+    if (feePayments.length > 0 && (members.length > 0 || registrations.length > 0)) {
+      setFeePayments((prevList) => {
+        let changed = false;
+        const updated = prevList.map((fee) => {
+          const resolvedName = resolveFeeMemberName(fee, members, registrations);
+          if (resolvedName !== fee.memberName && resolvedName !== 'Gym Member') {
+            changed = true;
+            return {
+              ...fee,
+              memberName: resolvedName,
+              fullName: resolvedName,
+            };
+          }
+          return fee;
+        });
+        return changed ? updated : prevList;
+      });
+    }
+  }, [members, registrations, feePayments.length]);
 
   useEffect(() => {
     const token = getSavedAdminToken();
@@ -1428,9 +1559,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
   // Actions: Search Member For Fee
   const handleSearchMemberForFee = async () => {
-    const query = (addFeeForm.referenceOrRollNumber || '').trim();
-    if (!query) {
-      setSearchMemberError('Please enter a Roll Number or Registration Reference.');
+    const rawQuery = (addFeeForm.referenceOrRollNumber || '').trim();
+    if (!rawQuery) {
+      setSearchMemberError('Please enter a Roll Number, Registration Reference, Name, or Phone.');
       return;
     }
 
@@ -1438,21 +1569,49 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     setSearchMemberError('');
 
     try {
-      const selectedMember: any = members.find(
-        (m) =>
-          (m.rollNumber && m.rollNumber.trim().toLowerCase() === query.toLowerCase()) ||
-          (m.registrationReferenceNumber && m.registrationReferenceNumber.trim().toLowerCase() === query.toLowerCase()) ||
-          (m.registrationRef && m.registrationRef.trim().toLowerCase() === query.toLowerCase())
-      ) || registrations.find(
-        (r) =>
-          (r.rollNumber && r.rollNumber.trim().toLowerCase() === query.toLowerCase()) ||
-          (getRegistrationReference(r).toLowerCase() === query.toLowerCase())
-      ) || {};
+      const queryLower = rawQuery.toLowerCase();
+      const queryClean = rawQuery.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const queryDigits = rawQuery.replace(/\D/g, '');
+
+      // 1. Search in local members list
+      let selectedMember: any = members.find((m: any) => {
+        const mRoll = String(m.rollNumber || '').trim().toLowerCase();
+        const mRollClean = String(m.rollNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const mReg = String(m.registrationReferenceNumber || m.registrationRef || '').trim().toLowerCase();
+        const mRegClean = String(m.registrationReferenceNumber || m.registrationRef || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const mName = String(m.fullName || m.name || '').trim().toLowerCase();
+        const mPhone = String(m.phone || m.phoneNumber || '').replace(/\D/g, '');
+
+        if (mRoll === queryLower || (queryClean && mRollClean === queryClean)) return true;
+        if (mReg === queryLower || (queryClean && mRegClean === queryClean)) return true;
+        if (mName && mName.includes(queryLower)) return true;
+        if (queryDigits.length >= 4 && mPhone && mPhone.includes(queryDigits)) return true;
+        return false;
+      });
+
+      // 2. Search in local registrations list if not found
+      if (!selectedMember) {
+        selectedMember = registrations.find((r: any) => {
+          const rRoll = String(r.rollNumber || '').trim().toLowerCase();
+          const rRollClean = String(r.rollNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+          const rReg = getRegistrationReference(r).trim().toLowerCase();
+          const rRegClean = getRegistrationReference(r).toUpperCase().replace(/[^A-Z0-9]/g, '');
+          const rName = String(r.fullName || '').trim().toLowerCase();
+          const rPhone = String(r.phone || r.phoneNumber || '').replace(/\D/g, '');
+
+          if (rRoll === queryLower || (queryClean && rRollClean === queryClean)) return true;
+          if (rReg === queryLower || (queryClean && rRegClean === queryClean)) return true;
+          if (rName && rName.includes(queryLower)) return true;
+          if (queryDigits.length >= 4 && rPhone && rPhone.includes(queryDigits)) return true;
+          return false;
+        }) || {};
+      }
 
       const referenceOrRollNumber =
         selectedMember.rollNumber ||
-        selectedMember["Roll Number"] ||
-        query;
+        selectedMember.registrationReferenceNumber ||
+        selectedMember.registrationRef ||
+        rawQuery;
 
       const phoneFirst4 = String(
         selectedMember.phone ||
@@ -1479,7 +1638,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       console.log("ADMIN MEMBER SEARCH RESPONSE:", result);
 
       if (!result || result.success === false) {
-        const errorMsg = result?.message || result?.error || 'No member found with this Roll Number or Registration Reference.';
+        const errorMsg = result?.message || result?.error || `No member found matching "${rawQuery}". Please check the Roll Number or Reg Ref.`;
         setSearchMemberError(errorMsg);
         return;
       }
@@ -1583,6 +1742,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
         memberData.fullName ||
         memberData["Full Name"] ||
         selectedMember.fullName ||
+        selectedMember.name ||
         "";
 
       const phoneNumber =
@@ -1601,8 +1761,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
         selectedMember.emailAddress ||
         "";
 
+      const resolvedRefOrRoll = selectedMember.rollNumber || memberData.rollNumber || selectedMember.registrationReferenceNumber || memberData.registrationReference || rawQuery;
+
       setAddFeeForm((prev) => ({
         ...prev,
+        referenceOrRollNumber: resolvedRefOrRoll,
         fullName,
         phoneNumber,
         emailAddress,
@@ -1679,6 +1842,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       action: "adminSubmitFeePayment",
       token: localStorage.getItem("abFitnessAdminToken") || getSavedAdminToken(),
       referenceOrRollNumber: addFeeForm.referenceOrRollNumber.trim(),
+      memberName: (addFeeForm.fullName || addFeeForm.memberName || '').trim(),
+      fullName: (addFeeForm.fullName || addFeeForm.memberName || '').trim(),
+      phone: (addFeeForm.phoneNumber || addFeeForm.phone || '').trim(),
+      phoneNumber: (addFeeForm.phoneNumber || addFeeForm.phone || '').trim(),
+      email: (addFeeForm.emailAddress || addFeeForm.email || '').trim(),
+      emailAddress: (addFeeForm.emailAddress || addFeeForm.email || '').trim(),
       selectedPlan: addFeeForm.selectedPlan,
       feeDuration: addFeeForm.feeDuration,
       feeCalculationMode: addFeeForm.feeCalculationMode,
@@ -1990,18 +2159,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
   // Filtered Datasets
   const filteredRegs = registrations.filter((r) => {
     const query = regSearch.trim().toLowerCase();
-    const refNum = r.registrationReferenceNumber || r.registrationRef || '';
-    const name = r.fullName || '';
-    const phone = r.phoneNumber || r.phone || '';
-    const email = r.emailAddress || r.email || '';
-    const roll = r.rollNumber || '';
+    const refNum = String(r.registrationReferenceNumber || r.registrationRef || '');
+    const name = String(r.fullName || '');
+    const phone = String(r.phoneNumber || r.phone || '');
+    const email = String(r.emailAddress || r.email || '');
+    const roll = String(r.rollNumber || '');
 
     const matchesSearch =
       !query ||
       refNum.toLowerCase().includes(query) ||
       roll.toLowerCase().includes(query) ||
       name.toLowerCase().includes(query) ||
-      phone.includes(query) ||
+      phone.toLowerCase().includes(query) ||
       email.toLowerCase().includes(query);
 
     const statusVal = r.registrationStatus || r.status;
@@ -2014,12 +2183,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
   });
 
   const filteredMembers = members.filter((m) => {
-    const query = memberSearch.toLowerCase();
+    const query = memberSearch.trim().toLowerCase();
+    const name = String(m.fullName || m.name || '');
+    const roll = String(m.rollNumber || m.rollNo || '');
+    const phone = String(m.phone || m.phoneNumber || '');
+    const email = String(m.email || m.emailAddress || '');
+
     const matchesSearch =
-      m.fullName.toLowerCase().includes(query) ||
-      m.rollNumber.toLowerCase().includes(query) ||
-      m.phone.includes(query) ||
-      m.email.toLowerCase().includes(query);
+      !query ||
+      name.toLowerCase().includes(query) ||
+      roll.toLowerCase().includes(query) ||
+      phone.toLowerCase().includes(query) ||
+      email.toLowerCase().includes(query);
 
     const matchesStatus = memberStatusFilter === 'All' || m.status === memberStatusFilter;
     return matchesSearch && matchesStatus;
@@ -2028,15 +2203,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
   const filteredFees = feePayments.filter((record) => {
     const query = feeSearch.trim().toLowerCase();
 
+    const feeRef = String(record.feeReferenceNumber || record.feeRef || '');
+    const regRef = String(record.registrationReferenceNumber || record.registrationRef || '');
+    const roll = String(record.rollNumber || '');
+    const name = String(record.memberName || record.fullName || '');
+    const phone = String(record.phoneNumber || record.memberPhone || record.phone || '');
+
     const matchesSearch =
       !query ||
-      record.feeReferenceNumber?.toLowerCase().includes(query) ||
-      record.registrationReferenceNumber?.toLowerCase().includes(query) ||
-      record.registrationRef?.toLowerCase().includes(query) ||
-      record.rollNumber?.toLowerCase().includes(query) ||
-      record.memberName?.toLowerCase().includes(query) ||
-      record.phoneNumber?.includes(query) ||
-      record.memberPhone?.includes(query);
+      feeRef.toLowerCase().includes(query) ||
+      regRef.toLowerCase().includes(query) ||
+      roll.toLowerCase().includes(query) ||
+      name.toLowerCase().includes(query) ||
+      phone.toLowerCase().includes(query);
 
     const matchesStatus =
       feeStatusFilter === "All Statuses" ||
@@ -2046,6 +2225,69 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
     return matchesSearch && matchesStatus;
   });
+
+  const parsePaymentDateForSort = (record: FeePaymentRecord): number => {
+    const dStr = record.paymentDate || record.timestamp || record.createdAt || (record as any).date || '';
+    if (!dStr) return 0;
+    const parsed = Date.parse(dStr);
+    if (!isNaN(parsed)) return parsed;
+
+    const parts = dStr.split('/');
+    if (parts.length === 3) {
+      const day = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const year = parseInt(parts[2], 10);
+      const d = new Date(year, month, day);
+      if (!isNaN(d.getTime())) return d.getTime();
+    }
+    return 0;
+  };
+
+  const filteredPaymentHistory = feePayments
+    .filter((record) => {
+      const query = historySearch.trim().toLowerCase();
+
+      const feeRef = String(record.feeReferenceNumber || record.feeRef || '');
+      const regRef = String(record.registrationReferenceNumber || record.registrationRef || '');
+      const roll = String(record.rollNumber || '');
+      const name = String(record.memberName || record.fullName || '');
+      const phone = String(record.phoneNumber || record.memberPhone || record.phone || '');
+      const upi = String(record.upiTransactionId || record.upiTxnId || '');
+      const receipt = String(record.receiptNumber || '');
+
+      const matchesSearch =
+        !query ||
+        feeRef.toLowerCase().includes(query) ||
+        regRef.toLowerCase().includes(query) ||
+        roll.toLowerCase().includes(query) ||
+        name.toLowerCase().includes(query) ||
+        phone.toLowerCase().includes(query) ||
+        upi.toLowerCase().includes(query) ||
+        receipt.toLowerCase().includes(query);
+
+      const status = record.paymentStatus || record.status || '';
+      const matchesStatus =
+        historyStatusFilter === 'All' ||
+        (historyStatusFilter === 'Successful' && (status === 'Successful' || status === 'Approved')) ||
+        (historyStatusFilter === 'Pending Verification' && (status === 'Pending Verification' || status === 'Pending')) ||
+        (historyStatusFilter === 'Rejected' && status === 'Rejected');
+
+      const method = String(record.paymentMethod || '');
+      const matchesMethod =
+        historyMethodFilter === 'All' ||
+        method.toLowerCase() === historyMethodFilter.toLowerCase();
+
+      return matchesSearch && matchesStatus && matchesMethod;
+    })
+    .sort((a, b) => {
+      const dateA = parsePaymentDateForSort(a);
+      const dateB = parsePaymentDateForSort(b);
+      if (historySortOrder === 'newest') {
+        return dateB - dateA;
+      } else {
+        return dateA - dateB;
+      }
+    });
 
   return (
     <div className="min-h-screen bg-[#050505] text-[#f5f5f4] flex flex-col font-sans">
@@ -2148,6 +2390,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               { id: 'registrations', label: 'Registrations', icon: UserCheck, count: registrations.filter(r => r.status === 'Pending Verification' || (r.status as string) === 'Pending').length, path: '/admin/registrations' },
               { id: 'members', label: 'Members', icon: Users, count: members.length, path: '/admin/members' },
               { id: 'fee-records', label: 'Fee Payments', icon: CreditCard, count: feePayments.filter(f => f.status === 'Pending Verification').length, path: '/admin/fee-records' },
+              { id: 'payment-history', label: 'Payment History', icon: History, count: feePayments.length, path: '/admin/payment-history' },
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -2422,26 +2665,35 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
               {/* Filters */}
               <div className="flex items-center gap-2">
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={regSearch}
-                    onChange={(e) => setRegSearch(e.target.value)}
-                    placeholder="Search Ref, Name, Phone..."
-                    className="pl-9 pr-8 py-2 bg-[#0F0F12] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-all"
-                  />
-                  {regSearch && (
-                    <button
-                      type="button"
-                      onClick={() => setRegSearch('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-0.5"
-                      title="Clear search"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
+                <form onSubmit={(e) => e.preventDefault()} className="flex items-center gap-1.5">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={regSearch}
+                      onChange={(e) => setRegSearch(e.target.value)}
+                      placeholder="Search Ref, Name, Phone..."
+                      className="pl-9 pr-8 py-2 bg-[#0F0F12] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-all"
+                    />
+                    {regSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setRegSearch('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-0.5"
+                        title="Clear search"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    className="px-3 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer shrink-0"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Search</span>
+                  </button>
+                </form>
 
                 <select
                   value={regStatusFilter}
@@ -2733,26 +2985,35 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
               {/* Filters */}
               <div className="flex items-center gap-2">
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={memberSearch}
-                    onChange={(e) => setMemberSearch(e.target.value)}
-                    placeholder="Search Roll, Name, Phone..."
-                    className="pl-9 pr-8 py-2 bg-[#0F0F12] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition-all"
-                  />
-                  {memberSearch && (
-                    <button
-                      type="button"
-                      onClick={() => setMemberSearch('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-0.5"
-                      title="Clear search"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
+                <form onSubmit={(e) => e.preventDefault()} className="flex items-center gap-1.5">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={memberSearch}
+                      onChange={(e) => setMemberSearch(e.target.value)}
+                      placeholder="Search Roll, Name, Phone..."
+                      className="pl-9 pr-8 py-2 bg-[#0F0F12] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition-all"
+                    />
+                    {memberSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setMemberSearch('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-0.5"
+                        title="Clear search"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer shrink-0"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Search</span>
+                  </button>
+                </form>
 
                 <select
                   value={memberStatusFilter}
@@ -2892,26 +3153,35 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   Add Fee Payment
                 </button>
 
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={feeSearch}
-                    onChange={(e) => setFeeSearch(e.target.value)}
-                    placeholder="Search Fee Ref, Reg Ref, Roll, Name..."
-                    className="pl-9 pr-8 py-2 bg-[#0F0F12] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition-all"
-                  />
-                  {feeSearch && (
-                    <button
-                      type="button"
-                      onClick={() => setFeeSearch('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-0.5"
-                      title="Clear search"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
+                <form onSubmit={(e) => e.preventDefault()} className="flex items-center gap-1.5">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={feeSearch}
+                      onChange={(e) => setFeeSearch(e.target.value)}
+                      placeholder="Search Fee Ref, Reg Ref, Roll, Name..."
+                      className="pl-9 pr-8 py-2 bg-[#0F0F12] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition-all"
+                    />
+                    {feeSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setFeeSearch('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-0.5"
+                        title="Clear search"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer shrink-0"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Search</span>
+                  </button>
+                </form>
 
                 <select
                   value={feeStatusFilter}
@@ -3137,6 +3407,301 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                                       </>
                                     )}
                                   </motion.button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 5: PAYMENT HISTORY */}
+        {activeTab === 'payment-history' && (
+          <div className="space-y-6">
+            {/* Header / KPI Banner */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#0F0F12] border border-zinc-800/80 p-6 rounded-3xl shadow-xl">
+              <div>
+                <h2 className="text-xl font-black text-white font-mono uppercase tracking-tight flex items-center gap-2.5">
+                  <History className="w-6 h-6 text-blue-500" />
+                  PAYMENT HISTORY & TRANSACTIONS
+                </h2>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Full historical archive of all fee payment submissions, verified transactions, and receipts.
+                </p>
+              </div>
+
+              {/* Summary Stats */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="bg-[#141419] border border-zinc-800 rounded-2xl px-4 py-2.5 min-w-[120px]">
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase block">Total Records</span>
+                  <span className="text-lg font-black text-white font-mono">{feePayments.length}</span>
+                </div>
+                <div className="bg-[#141419] border border-emerald-500/20 rounded-2xl px-4 py-2.5 min-w-[130px]">
+                  <span className="text-[10px] font-bold text-emerald-400 uppercase block">Total Collection</span>
+                  <span className="text-lg font-black text-emerald-400 font-mono">
+                    ₹{feePayments
+                      .filter(f => isStatusApproved(f.paymentStatus || f.status))
+                      .reduce((sum, f) => sum + (Number(f.amountPaid) || Number(f.finalPayableAmount) || 0), 0)
+                      .toLocaleString()}
+                  </span>
+                </div>
+                <div className="bg-[#141419] border border-blue-500/20 rounded-2xl px-4 py-2.5 min-w-[130px]">
+                  <span className="text-[10px] font-bold text-blue-400 uppercase block">Filtered Count</span>
+                  <span className="text-lg font-black text-blue-400 font-mono">{filteredPaymentHistory.length}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <div className="bg-[#0F0F12] border border-zinc-800/80 p-4 rounded-2xl space-y-3">
+              <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+                {/* Search Form */}
+                <form onSubmit={(e) => e.preventDefault()} className="relative flex-1 flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={historySearch}
+                      onChange={(e) => setHistorySearch(e.target.value)}
+                      placeholder="Search by Roll #, Reg Ref #, Fee Ref #, Name, Phone..."
+                      className="w-full pl-10 pr-9 py-2.5 bg-[#141419] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500 transition-all font-mono"
+                    />
+                    {historySearch && (
+                      <button
+                        type="button"
+                        onClick={() => setHistorySearch('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                        title="Clear search"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shrink-0 shadow-lg shadow-blue-600/20 active:scale-95"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    <span>Search</span>
+                  </button>
+                </form>
+
+                {/* Filter Controls */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Status Filter */}
+                  <select
+                    value={historyStatusFilter}
+                    onChange={(e) => setHistoryStatusFilter(e.target.value)}
+                    className="bg-[#141419] border border-zinc-800 text-zinc-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500 cursor-pointer font-sans"
+                  >
+                    <option value="All">All Statuses</option>
+                    <option value="Successful">Successful / Approved</option>
+                    <option value="Pending Verification">Pending Verification</option>
+                    <option value="Rejected">Rejected</option>
+                  </select>
+
+                  {/* Payment Method Filter */}
+                  <select
+                    value={historyMethodFilter}
+                    onChange={(e) => setHistoryMethodFilter(e.target.value)}
+                    className="bg-[#141419] border border-zinc-800 text-zinc-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500 cursor-pointer font-sans"
+                  >
+                    <option value="All">All Methods</option>
+                    <option value="UPI">UPI Payment</option>
+                    <option value="Cash">Cash</option>
+                  </select>
+
+                  {/* Date Sort Order Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setHistorySortOrder(prev => prev === 'newest' ? 'oldest' : 'newest')}
+                    className="px-3 py-2.5 bg-[#141419] hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                    title={`Sort by Date: currently ${historySortOrder === 'newest' ? 'Newest First' : 'Oldest First'}`}
+                  >
+                    <ArrowUpDown className="w-3.5 h-3.5 text-blue-400" />
+                    <span>{historySortOrder === 'newest' ? 'Date: Newest First' : 'Date: Oldest First'}</span>
+                  </button>
+
+                  {/* Reset Filters */}
+                  {(historySearch || historyStatusFilter !== 'All' || historyMethodFilter !== 'All' || historySortOrder !== 'newest') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHistorySearch('');
+                        setHistoryStatusFilter('All');
+                        setHistoryMethodFilter('All');
+                        setHistorySortOrder('newest');
+                      }}
+                      className="px-3 py-2.5 bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/50 text-zinc-400 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Reset</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Payment History Table */}
+            <div className="bg-[#0F0F12] border border-zinc-800/80 rounded-3xl overflow-hidden shadow-xl">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-zinc-300 font-sans">
+                  <thead className="bg-[#141419] border-b border-zinc-800 text-zinc-400 font-bold uppercase tracking-wider font-mono">
+                    <tr>
+                      <th className="py-3.5 px-4">Fee Ref / Receipt</th>
+                      <th className="py-3.5 px-4">Member Info</th>
+                      <th className="py-3.5 px-4">Plan Details</th>
+                      <th className="py-3.5 px-4">Amount &amp; Method</th>
+                      <th className="py-3.5 px-4">Payment Date</th>
+                      <th className="py-3.5 px-4">Status</th>
+                      <th className="py-3.5 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/60 font-mono">
+                    {filteredPaymentHistory.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-16 text-center text-zinc-500 font-sans">
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <History className="w-10 h-10 text-zinc-600 mb-1" />
+                            <p className="text-sm font-bold text-zinc-400">No payment records found</p>
+                            <p className="text-xs text-zinc-500">
+                              {historySearch || historyStatusFilter !== 'All' || historyMethodFilter !== 'All'
+                                ? 'Try adjusting your search criteria or filters.'
+                                : 'Fee payments will appear here once submitted.'}
+                            </p>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredPaymentHistory.map((record) => {
+                        const statusVal = record.paymentStatus || record.status || 'Pending Verification';
+                        const isApproved = isStatusApproved(statusVal);
+                        const isRejected = isStatusRejected(statusVal);
+
+                        const feeRef = record.feeReferenceNumber || record.feeRef || 'N/A';
+                        const regRef = record.registrationReferenceNumber || record.registrationRef || '';
+                        const rollNo = record.rollNumber || '';
+                        const name = record.memberName || record.fullName || 'N/A';
+                        const phone = record.phoneNumber || record.memberPhone || record.phone || 'N/A';
+                        const amount = record.amountPaid || record.finalPayableAmount || 0;
+                        const dateStr = record.paymentDate || record.timestamp || record.createdAt || 'N/A';
+                        const method = record.paymentMethod || 'UPI';
+                        const upiId = record.upiTransactionId || record.upiTxnId || '';
+                        const screenshotUrl = record.paymentScreenshotUrl || record.upiScreenshotUrl || record.paymentScreenshot;
+
+                        return (
+                          <tr key={record.id || feeRef} className="hover:bg-zinc-800/30 transition-colors">
+                            {/* Fee Ref & Receipt */}
+                            <td className="py-3.5 px-4">
+                              <div className="font-bold text-emerald-400">{feeRef}</div>
+                              {record.receiptNumber && (
+                                <div className="text-[10px] text-zinc-400 mt-0.5">
+                                  Receipt #: <span className="text-zinc-200">{record.receiptNumber}</span>
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Member Info */}
+                            <td className="py-3.5 px-4 font-sans">
+                              <div className="font-bold text-white text-sm">{name}</div>
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1 font-mono text-[11px]">
+                                {rollNo ? (
+                                  <span className="px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded text-[10px] font-bold">
+                                    {rollNo}
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded text-[10px]">
+                                    No Roll #
+                                  </span>
+                                )}
+                                {regRef && (
+                                  <span className="px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded text-[10px]">
+                                    {regRef}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-zinc-400 mt-0.5">{phone}</div>
+                            </td>
+
+                            {/* Plan Details */}
+                            <td className="py-3.5 px-4 font-sans">
+                              <div className="font-bold text-zinc-200">{record.selectedPlan || record.planName || 'Gym Membership'}</div>
+                              {record.feeDuration && (
+                                <div className="text-[10px] text-zinc-400 mt-0.5">{record.feeDuration}</div>
+                              )}
+                            </td>
+
+                            {/* Amount & Method */}
+                            <td className="py-3.5 px-4">
+                              <div className="font-black text-white text-sm">₹{Number(amount).toLocaleString()}</div>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="px-1.5 py-0.5 bg-zinc-800 text-zinc-300 rounded text-[10px] uppercase font-bold">
+                                  {method}
+                                </span>
+                                {upiId && (
+                                  <span className="text-[10px] text-zinc-400 font-mono truncate max-w-[100px]" title={upiId}>
+                                    Txn: {upiId}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Payment Date */}
+                            <td className="py-3.5 px-4 text-zinc-300 text-xs">
+                              {dateStr}
+                            </td>
+
+                            {/* Status */}
+                            <td className="py-3.5 px-4">
+                              {isApproved ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold">
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  Successful
+                                </span>
+                              ) : isRejected ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 text-[11px] font-bold">
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  Rejected
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-bold">
+                                  <Clock className="w-3.5 h-3.5" />
+                                  Pending Verification
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Actions */}
+                            <td className="py-3.5 px-4 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                {/* Receipt PDF Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => setReceiptModalRecord(record)}
+                                  className="px-2.5 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                                  title="View & Download Fee Receipt"
+                                >
+                                  <FileText className="w-3.5 h-3.5" />
+                                  <span>Receipt</span>
+                                </button>
+
+                                {/* Screenshot Button if available */}
+                                {screenshotUrl && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setScreenshotModalUrl(screenshotUrl)}
+                                    className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                                    title="View Payment Screenshot"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                    <span>Proof</span>
+                                  </button>
                                 )}
                               </div>
                             </td>

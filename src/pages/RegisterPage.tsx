@@ -331,9 +331,12 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ initialPlanId, onNav
         origin: { y: 0.6 },
       });
 
-      // Redirect user automatically to /pay-fee?registrationRef={{Registration Reference Number}}
-      onNavigate('/pay-fee', {
+      // Navigate user to /registration-success page with details
+      onNavigate('/registration-success', {
         registrationRef: regRef,
+        fullName: formData.fullName,
+        selectedPlan: formData.selectedPlan || 'Selected Membership Plan',
+        status: 'Pending Verification',
       });
     } catch (err: any) {
       setIsSubmitting(false);
@@ -877,10 +880,10 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ initialPlanId, onNav
 
             <div className="space-y-2">
               <h2 className="text-2xl font-black text-white font-mono uppercase tracking-tight">
-                REGISTRATION SUBMITTED SUCCESSFULLY
+                THANK YOU FOR SUBMITTING!
               </h2>
-              <p className="text-xs text-zinc-300 leading-relaxed">
-                Thank you for registering with AB Gym. Your registration has been submitted and is currently pending admin verification.
+              <p className="text-sm text-emerald-400 font-semibold leading-relaxed">
+                Thank you for submitting the registration form! Our team will review & approve your application. Please come to the AB Fitness Office.
               </p>
             </div>
 
