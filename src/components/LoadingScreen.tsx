@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
+import abGymLogo from '../assets/ab-gym-logo.png';
 
 interface LoadingScreenProps {
   message?: string;
@@ -24,7 +25,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       >
         <div className="absolute inset-0 bg-blue-600/20 blur-3xl rounded-full scale-125" />
         <img
-          src="/assets/ab-gym-logo.png"
+          src={abGymLogo}
           alt="AB Gym Official Logo"
           referrerPolicy="no-referrer"
           loading="eager"

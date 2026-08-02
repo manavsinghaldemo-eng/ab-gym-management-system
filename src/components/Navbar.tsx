@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { getStoredSettings, STORAGE_EVENT } from '../lib/storage';
 import { GymSettings } from '../types';
+import abGymLogo from '../assets/ab-gym-logo.png';
 
 interface NavbarProps {
   currentPath: string;
@@ -75,7 +76,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, onNavigate }) => {
           >
             <div className="relative flex items-center justify-center">
               <img
-                src="/assets/ab-gym-logo.png"
+                src={abGymLogo}
                 alt="AB Gym Official Logo"
                 referrerPolicy="no-referrer"
                 loading="eager"

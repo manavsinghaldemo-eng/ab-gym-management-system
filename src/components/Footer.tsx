@@ -13,6 +13,7 @@ import {
   Heart,
 } from 'lucide-react';
 import { getStoredSettings } from '../lib/storage';
+import abGymLogo from '../assets/ab-gym-logo.png';
 
 interface FooterProps {
   onNavigate: (path: string) => void;
@@ -34,7 +35,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
           <div className="lg:col-span-2 space-y-5">
             <div className="flex items-center gap-3">
               <img
-                src="/assets/ab-gym-logo.png"
+                src={abGymLogo}
                 alt="AB Gym Official Logo"
                 referrerPolicy="no-referrer"
                 loading="lazy"
