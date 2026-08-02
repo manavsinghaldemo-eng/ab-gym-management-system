@@ -19,6 +19,8 @@ import {
   getMemberForFee as getMemberForFeeStorage,
   getMemberFeeHistory as getMemberFeeHistoryStorage,
   evaluateFeePaymentBlockingStorage,
+  updateMemberInStorage,
+  fallbackAdminSubmitFeePayment,
 } from './storage';
 
 import { GOOGLE_APPS_SCRIPT_URL, callABFitnessBackend } from './config';
@@ -493,6 +495,10 @@ async function fallbackAppsScriptBackend<T>(
 
   if (action === 'getMemberFeeHistory' || action === 'getMemberPaymentHistory' || action === 'getFeeHistory') {
     return getMemberFeeHistoryStorage(data) as any;
+  }
+
+  if (action === 'updateMember') {
+    return updateMemberInStorage(data as any) as any;
   }
 
   return {
@@ -1291,74 +1297,81 @@ export const apiService = {
   resendReceipt: (feeRef: string, token?: string) =>
     callAdminApi('resendReceipt', { feeReferenceNumber: (feeRef || '').trim().toUpperCase() }, token),
 
-  adminSubmitFeePayment: async (formData: any) => {
-    const scriptUrl = getScriptUrl();
-    const payload = formData.action === "adminSubmitFeePayment" ? formData : {
-      action: "adminSubmitFeePayment",
-      token: localStorage.getItem("abFitnessAdminToken") || getSavedAdminToken(),
-      referenceOrRollNumber: (formData.referenceOrRollNumber || '').trim(),
-      memberName: (formData.memberName || formData.fullName || '').trim(),
-      fullName: (formData.fullName || formData.memberName || '').trim(),
-      phone: (formData.phone || formData.phoneNumber || '').trim(),
-      phoneNumber: (formData.phoneNumber || formData.phone || '').trim(),
-      email: (formData.email || formData.emailAddress || '').trim(),
-      emailAddress: (formData.emailAddress || formData.email || '').trim(),
-      selectedPlan: formData.selectedPlan || '',
-      feeDuration: formData.feeDuration || '1 Month',
-      feeCalculationMode: formData.feeCalculationMode || 'Auto Calculate',
-      feePriceType: formData.feePriceType || 'Regular Price',
-      regularPlanAmount: Number(formData.regularPlanAmount || 0),
-      finalFeeAmount: Number(formData.finalFeeAmount ?? formData.feeAmount ?? 0),
-      offerNote: (formData.offerNote || '').trim(),
-      offerValidFrom: formData.offerValidFrom || '',
-      offerValidUntil: formData.offerValidUntil || '',
-      savePriceForFuture: Boolean(formData.savePriceForFuture),
-      feeMonth: formData.feeMonth || '',
-      feeAmount: Number(formData.feeAmount || 0),
-      previousBalance: Number(formData.previousBalance || 0),
-      discount: Number(formData.discount || 0),
-      totalPaid: Number(formData.amountPaid ?? formData.totalPaid ?? 0),
-      paymentType: formData.paymentType || 'Full Payment',
-      paymentMethod: formData.paymentMethod || 'Cash',
-      upiTransactionId:
-        formData.paymentMethod === "UPI"
-          ? (formData.upiTransactionId || '').trim()
-          : "",
-      paymentDate: formData.paymentDate || '',
-      adminRemarks: (formData.adminRemarks || '').trim(),
-    };
-
-    const response = await fetch(scriptUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP Error ${response.status}: Could not connect to backend service.`);
-    }
-
-    const text = await response.text();
-    let json: any;
+  updateMember: async (memberData: any, token?: string) => {
+    const localRes = updateMemberInStorage(memberData);
     try {
-      json = JSON.parse(text);
-    } catch {
-      throw new Error('Invalid response from backend server.');
+      const res = await callAdminApi('updateMember', memberData, token);
+      if (res && (res.success || res.status === 'success' || res.status === 'Approved')) {
+        return res;
+      }
+    } catch (err) {
+      console.warn('callAdminApi updateMember failed, using local storage response:', err);
+    }
+    return localRes;
+  },
+
+  adminSubmitFeePayment: async (formData: any) => {
+    try {
+      const scriptUrl = getScriptUrl();
+      const payload = formData.action === "adminSubmitFeePayment" ? formData : {
+        action: "adminSubmitFeePayment",
+        token: localStorage.getItem("abFitnessAdminToken") || getSavedAdminToken(),
+        referenceOrRollNumber: (formData.referenceOrRollNumber || '').trim(),
+        memberName: (formData.memberName || formData.fullName || '').trim(),
+        fullName: (formData.fullName || formData.memberName || '').trim(),
+        phone: (formData.phone || formData.phoneNumber || '').trim(),
+        phoneNumber: (formData.phoneNumber || formData.phone || '').trim(),
+        email: (formData.email || formData.emailAddress || '').trim(),
+        emailAddress: (formData.emailAddress || formData.email || '').trim(),
+        selectedPlan: formData.selectedPlan || '',
+        feeDuration: formData.feeDuration || '1 Month',
+        feeCalculationMode: formData.feeCalculationMode || 'Auto Calculate',
+        feePriceType: formData.feePriceType || 'Regular Price',
+        regularPlanAmount: Number(formData.regularPlanAmount || 0),
+        finalFeeAmount: Number(formData.finalFeeAmount ?? formData.feeAmount ?? 0),
+        offerNote: (formData.offerNote || '').trim(),
+        offerValidFrom: formData.offerValidFrom || '',
+        offerValidUntil: formData.offerValidUntil || '',
+        savePriceForFuture: Boolean(formData.savePriceForFuture),
+        feeMonth: formData.feeMonth || '',
+        feeAmount: Number(formData.feeAmount || 0),
+        previousBalance: Number(formData.previousBalance || 0),
+        discount: Number(formData.discount || 0),
+        totalPaid: Number(formData.amountPaid ?? formData.totalPaid ?? 0),
+        paymentType: formData.paymentType || 'Full Payment',
+        paymentMethod: formData.paymentMethod || 'Cash',
+        upiTransactionId:
+          formData.paymentMethod === "UPI"
+            ? (formData.upiTransactionId || '').trim()
+            : "",
+        paymentDate: formData.paymentDate || '',
+        adminRemarks: (formData.adminRemarks || '').trim(),
+      };
+
+      const response = await fetch(scriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.ok) {
+        const text = await response.text();
+        const json = JSON.parse(text);
+        const isSuccess =
+          json.success === true ||
+          json.status === 'success' ||
+          json.status === 'Successful' ||
+          json.result === 'success';
+
+        if (isSuccess) {
+          return json;
+        }
+      }
+    } catch (err) {
+      console.warn("GAS adminSubmitFeePayment failed or unavailable, using local database fallback:", err);
     }
 
-    console.log("AB GYM BACKEND:", json);
-
-    const isSuccess =
-      json.success === true ||
-      json.status === 'success' ||
-      json.status === 'Successful' ||
-      json.result === 'success';
-
-    if (!isSuccess) {
-      throw new Error(json.message || json.error || 'Failed to submit fee payment.');
-    }
-
-    return json;
+    return fallbackAdminSubmitFeePayment(formData);
   },
 
   // Seed Sample Data

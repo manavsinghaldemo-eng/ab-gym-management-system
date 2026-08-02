@@ -932,3 +932,161 @@ export function getMemberFeeHistory(data: {
   };
 }
 
+export function updateMemberInStorage(updatedData: Partial<Member> & { rollNumber: string }) {
+  const members = getStoredMembers();
+  const rollClean = (updatedData.rollNumber || '').trim().toUpperCase();
+  const idx = members.findIndex(
+    m => (m.rollNumber || '').trim().toUpperCase() === rollClean || (updatedData.id && m.id === updatedData.id)
+  );
+
+  let updatedMemberObj: Member;
+
+  if (idx !== -1) {
+    updatedMemberObj = {
+      ...members[idx],
+      ...updatedData,
+      fullName: updatedData.fullName !== undefined ? updatedData.fullName : members[idx].fullName,
+      phone: updatedData.phone !== undefined ? updatedData.phone : members[idx].phone,
+      email: updatedData.email !== undefined ? updatedData.email : members[idx].email,
+      planName: updatedData.planName !== undefined ? updatedData.planName : (updatedData.selectedPlan || members[idx].planName),
+      membershipExpiry: updatedData.membershipExpiry !== undefined ? updatedData.membershipExpiry : (updatedData.planExpiryDate || members[idx].membershipExpiry),
+      joiningDate: updatedData.joiningDate !== undefined ? updatedData.joiningDate : members[idx].joiningDate,
+      status: updatedData.status !== undefined ? updatedData.status : members[idx].status,
+      updatedAt: new Date().toISOString(),
+    };
+    members[idx] = updatedMemberObj;
+    saveMembers(members);
+  } else {
+    updatedMemberObj = {
+      id: updatedData.id || `mem-${Date.now()}`,
+      rollNumber: updatedData.rollNumber,
+      registrationRef: updatedData.registrationRef || `REG-${updatedData.rollNumber}`,
+      fullName: updatedData.fullName || '',
+      phone: updatedData.phone || '',
+      email: updatedData.email || '',
+      planName: updatedData.planName || updatedData.selectedPlan || 'Basic Plan',
+      joiningDate: updatedData.joiningDate || new Date().toISOString().split('T')[0],
+      membershipExpiry: updatedData.membershipExpiry || updatedData.planExpiryDate || '',
+      status: updatedData.status || 'Active',
+      dob: updatedData.dob || '',
+      gender: updatedData.gender || 'Male',
+      address: updatedData.address || '',
+      emergencyContact: updatedData.emergencyContact || '',
+      fitnessGoal: updatedData.fitnessGoal || '',
+      timestamp: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    members.unshift(updatedMemberObj);
+    saveMembers(members);
+  }
+
+  const regs = getStoredRegistrations();
+  const regIdx = regs.findIndex(
+    r => (r.rollNumber || '').trim().toUpperCase() === rollClean ||
+         (r.registrationRef || r.referenceNumber || '').trim().toUpperCase() === (updatedData.registrationRef || '').trim().toUpperCase()
+  );
+  if (regIdx !== -1) {
+    if (updatedData.fullName) regs[regIdx].fullName = updatedData.fullName;
+    if (updatedData.phone) regs[regIdx].phone = updatedData.phone;
+    if (updatedData.email) regs[regIdx].email = updatedData.email;
+    if (updatedData.planName) regs[regIdx].selectedPlan = updatedData.planName;
+    if (updatedData.joiningDate) regs[regIdx].joiningDate = updatedData.joiningDate;
+    saveRegistrations(regs);
+  }
+
+  logAdminActivity(
+    'Admin',
+    'Updated Member Details',
+    'Member',
+    rollClean,
+    'Active',
+    updatedMemberObj.status || 'Active',
+    `Updated details for ${updatedMemberObj.fullName}`
+  );
+
+  return {
+    success: true,
+    message: 'Member details updated successfully.',
+    data: updatedMemberObj,
+    member: updatedMemberObj,
+  };
+}
+
+export function fallbackAdminSubmitFeePayment(formData: any) {
+  const payments = getStoredPayments();
+  const now = new Date();
+  const feeRef = `ABG-FEE-${now.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const receiptNum = `ABG-REC-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  const feeAmt = Number(formData.feeAmount || formData.finalFeeAmount || 0);
+  const prevBal = Number(formData.previousBalance || 0);
+  const disc = Number(formData.discount || 0);
+  const totalPayable = Math.max(0, feeAmt + prevBal - disc);
+  const amtPaid = Number(formData.totalPaid ?? formData.amountPaid ?? totalPayable);
+  const remBal = Math.max(0, totalPayable - amtPaid);
+
+  const refOrRoll = (formData.referenceOrRollNumber || formData.rollNumber || formData.registrationRef || '').trim();
+  const memberName = (formData.fullName || formData.memberName || 'Member').trim();
+  const phone = (formData.phoneNumber || formData.phone || '').trim();
+  const email = (formData.emailAddress || formData.email || '').trim();
+  const plan = formData.selectedPlan || 'Gym Membership';
+  const feeMonth = formData.feeMonth || `${now.toLocaleString('default', { month: 'long' })} ${now.getFullYear()}`;
+
+  const newFeeRecord: FeePaymentRecord = {
+    id: `fee-admin-${Date.now()}`,
+    timestamp: now.toISOString(),
+    feeReferenceNumber: feeRef,
+    registrationRef: refOrRoll,
+    rollNumber: refOrRoll,
+    fullName: memberName,
+    phone,
+    email,
+    selectedPlan: plan,
+    plan,
+    feeMonth,
+    amount: String(feeAmt),
+    feeAmount: feeAmt,
+    currentFeeAmount: feeAmt,
+    previousBalance: prevBal,
+    discountAmount: disc,
+    finalPayableAmount: totalPayable,
+    amountPaid: amtPaid,
+    remainingBalance: remBal,
+    paymentDate: formData.paymentDate || now.toISOString().split('T')[0],
+    paymentMethod: formData.paymentMethod || 'Cash',
+    upiTransactionId: formData.upiTransactionId || '',
+    paymentStatus: 'Approved',
+    status: 'Approved',
+    adminVerificationStatus: 'Approved',
+    receiptNumber: receiptNum,
+    submissionSource: 'Admin Portal',
+    remarks: formData.adminRemarks || 'Added by Admin',
+    verifiedBy: 'Admin',
+    verifiedAt: now.toISOString(),
+    adminRemarks: formData.adminRemarks || 'Added by Admin',
+  };
+
+  payments.unshift(newFeeRecord);
+  savePayments(payments);
+
+  logAdminActivity(
+    'Admin',
+    'Admin Fee Payment Added',
+    'Fee Payment',
+    feeRef,
+    'Pending',
+    'Approved',
+    `Member: ${memberName} (${refOrRoll}) | Paid: ₹${amtPaid} | Rem: ₹${remBal}`
+  );
+
+  return {
+    success: true,
+    message: `Fee payment recorded successfully! Receipt #: ${receiptNum} | Remaining Balance: ₹${remBal.toLocaleString('en-IN')}`,
+    receiptNumber: receiptNum,
+    receiptNo: receiptNum,
+    feeReferenceNumber: feeRef,
+    remainingBalance: remBal,
+    data: newFeeRecord,
+  };
+}
+

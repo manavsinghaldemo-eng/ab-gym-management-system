@@ -53,6 +53,7 @@ import {
   Loader2,
   Database,
   Plus,
+  Edit3,
   QrCode,
   History,
   ArrowUpDown,
@@ -573,6 +574,116 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
   const [cardModalMember, setCardModalMember] = useState<Member | null>(null);
   const [receiptModalRecord, setReceiptModalRecord] = useState<FeePaymentRecord | null>(null);
+
+  // Edit Member Modal State
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [editMemberForm, setEditMemberForm] = useState<{
+    rollNumber: string;
+    fullName: string;
+    phone: string;
+    email: string;
+    planName: string;
+    joiningDate: string;
+    membershipExpiry: string;
+    status: 'Active' | 'Expired';
+    dob: string;
+    gender: string;
+    address: string;
+    emergencyContact: string;
+    remarks: string;
+  }>({
+    rollNumber: '',
+    fullName: '',
+    phone: '',
+    email: '',
+    planName: '',
+    joiningDate: '',
+    membershipExpiry: '',
+    status: 'Active',
+    dob: '',
+    gender: 'Male',
+    address: '',
+    emergencyContact: '',
+    remarks: '',
+  });
+  const [isUpdatingMember, setIsUpdatingMember] = useState(false);
+  const [editMemberError, setEditMemberError] = useState('');
+
+  useEffect(() => {
+    if (editingMember) {
+      setEditMemberForm({
+        rollNumber: editingMember.rollNumber || '',
+        fullName: editingMember.fullName || '',
+        phone: editingMember.phone || '',
+        email: editingMember.email || '',
+        planName: editingMember.planName || 'Basic Plan',
+        joiningDate: editingMember.joiningDate || '',
+        membershipExpiry: editingMember.membershipExpiry || '',
+        status: editingMember.status === 'Active' ? 'Active' : 'Expired',
+        dob: editingMember.dob || '',
+        gender: editingMember.gender || 'Male',
+        address: editingMember.address || '',
+        emergencyContact: editingMember.emergencyContact || '',
+        remarks: editingMember.remarks || '',
+      });
+      setEditMemberError('');
+    }
+  }, [editingMember]);
+
+  const handleSaveEditMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editMemberForm.rollNumber.trim()) {
+      setEditMemberError('Roll number is required.');
+      return;
+    }
+    if (!editMemberForm.fullName.trim()) {
+      setEditMemberError('Full Name is required.');
+      return;
+    }
+
+    setIsUpdatingMember(true);
+    setEditMemberError('');
+
+    try {
+      const payload = {
+        action: 'updateMember',
+        rollNumber: editMemberForm.rollNumber.trim(),
+        fullName: editMemberForm.fullName.trim(),
+        phone: editMemberForm.phone.trim(),
+        email: editMemberForm.email.trim(),
+        planName: editMemberForm.planName.trim(),
+        selectedPlan: editMemberForm.planName.trim(),
+        joiningDate: editMemberForm.joiningDate,
+        membershipExpiry: editMemberForm.membershipExpiry,
+        planExpiryDate: editMemberForm.membershipExpiry,
+        status: editMemberForm.status,
+        memberStatus: editMemberForm.status,
+        dob: editMemberForm.dob,
+        gender: editMemberForm.gender,
+        address: editMemberForm.address,
+        emergencyContact: editMemberForm.emergencyContact,
+        remarks: editMemberForm.remarks,
+        adminName: 'Admin',
+      };
+
+      const res = await apiService.updateMember(payload);
+      if (res && res.success === false) {
+        setEditMemberError(res.message || 'Failed to update member.');
+        return;
+      }
+
+      setEditingMember(null);
+      await Promise.all([
+        fetchMembers(),
+        fetchDashboard(),
+        fetchActivityLogs(),
+      ]);
+    } catch (err: any) {
+      setEditMemberError(err.message || 'Error updating member details.');
+    } finally {
+      setIsUpdatingMember(false);
+    }
+  };
 
   // Add Fee Payment Modal State
   const [isAddFeeModalOpen, setIsAddFeeModalOpen] = useState(false);
@@ -1805,10 +1916,43 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       setSubmitFeeError('Please enter a Roll Number or Registration Reference.');
       return;
     }
-    if (!addFeeForm.feeMonth.trim()) {
-      setSubmitFeeError('Please specify the Fee Month (e.g., July 2026).');
-      return;
+
+    let resolvedFeeMonth = addFeeForm.feeMonth.trim();
+    if (!resolvedFeeMonth) {
+      const now = new Date();
+      resolvedFeeMonth = `${now.toLocaleString('default', { month: 'long' })} ${now.getFullYear()}`;
     }
+
+    let resolvedFullName = (addFeeForm.fullName || (addFeeForm as any).memberName || '').trim();
+    let resolvedPhone = (addFeeForm.phoneNumber || (addFeeForm as any).phone || '').trim();
+    let resolvedEmail = (addFeeForm.emailAddress || (addFeeForm as any).email || '').trim();
+    let resolvedPlan = addFeeForm.selectedPlan || '';
+
+    if (!resolvedFullName || !resolvedPlan) {
+      const queryClean = addFeeForm.referenceOrRollNumber.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const matchMem = members.find(m =>
+        (m.rollNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '') === queryClean ||
+        (m.registrationRef || '').toUpperCase().replace(/[^A-Z0-9]/g, '') === queryClean
+      );
+      if (matchMem) {
+        if (!resolvedFullName) resolvedFullName = matchMem.fullName;
+        if (!resolvedPhone) resolvedPhone = matchMem.phone;
+        if (!resolvedEmail) resolvedEmail = matchMem.email;
+        if (!resolvedPlan) resolvedPlan = matchMem.planName;
+      } else {
+        const matchReg = registrations.find(r =>
+          (r.rollNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '') === queryClean ||
+          getRegistrationReference(r).toUpperCase().replace(/[^A-Z0-9]/g, '') === queryClean
+        );
+        if (matchReg) {
+          if (!resolvedFullName) resolvedFullName = matchReg.fullName;
+          if (!resolvedPhone) resolvedPhone = matchReg.phone;
+          if (!resolvedEmail) resolvedEmail = matchReg.email;
+          if (!resolvedPlan) resolvedPlan = matchReg.selectedPlan;
+        }
+      }
+    }
+
     if (!addFeeForm.feeAmount || isNaN(Number(addFeeForm.feeAmount))) {
       setSubmitFeeError('Please enter a valid Fee Amount.');
       return;
@@ -1825,11 +1969,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
     const remainingBalance = Math.max(0, totalPayable - amountPaid);
 
-    console.log("ADMIN FEE FORM:", addFeeForm);
-    console.log("CALCULATED TOTAL PAYABLE:", totalPayable);
-    console.log("CALCULATED AMOUNT PAID:", amountPaid);
-    console.log("CALCULATED REMAINING:", remainingBalance);
-
     if (addFeeForm.paymentMethod === 'UPI' && !addFeeForm.upiTransactionId.trim()) {
       setSubmitFeeError('Please enter the UPI Transaction ID.');
       return;
@@ -1842,13 +1981,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       action: "adminSubmitFeePayment",
       token: localStorage.getItem("abFitnessAdminToken") || getSavedAdminToken(),
       referenceOrRollNumber: addFeeForm.referenceOrRollNumber.trim(),
-      memberName: (addFeeForm.fullName || addFeeForm.memberName || '').trim(),
-      fullName: (addFeeForm.fullName || addFeeForm.memberName || '').trim(),
-      phone: (addFeeForm.phoneNumber || addFeeForm.phone || '').trim(),
-      phoneNumber: (addFeeForm.phoneNumber || addFeeForm.phone || '').trim(),
-      email: (addFeeForm.emailAddress || addFeeForm.email || '').trim(),
-      emailAddress: (addFeeForm.emailAddress || addFeeForm.email || '').trim(),
-      selectedPlan: addFeeForm.selectedPlan,
+      memberName: resolvedFullName || `Member (${addFeeForm.referenceOrRollNumber.trim()})`,
+      fullName: resolvedFullName || `Member (${addFeeForm.referenceOrRollNumber.trim()})`,
+      phone: resolvedPhone,
+      phoneNumber: resolvedPhone,
+      email: resolvedEmail,
+      emailAddress: resolvedEmail,
+      selectedPlan: resolvedPlan || 'Gym Membership',
       feeDuration: addFeeForm.feeDuration,
       feeCalculationMode: addFeeForm.feeCalculationMode,
       feePriceType: addFeeForm.feePriceType,
@@ -1858,7 +1997,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       offerValidFrom: addFeeForm.offerValidFrom || '',
       offerValidUntil: addFeeForm.offerValidUntil || '',
       savePriceForFuture: addFeeForm.savePriceForFuture,
-      feeMonth: addFeeForm.feeMonth,
+      feeMonth: resolvedFeeMonth,
       feeAmount,
       previousBalance,
       discount,
@@ -3067,6 +3206,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                         <td className="py-3.5 px-4 text-right">
                           <div className="flex items-center justify-end gap-2 font-sans">
                             <button
+                              onClick={() => setEditingMember(m)}
+                              className="px-2.5 py-1.5 bg-purple-950/60 border border-purple-500/30 hover:bg-purple-900/60 text-purple-300 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer"
+                              title="Edit Member Details"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                              <span>Edit</span>
+                            </button>
+
+                            <button
                               onClick={() => setCardModalMember(m)}
                               className="px-2.5 py-1.5 bg-blue-950/60 border border-blue-500/30 hover:bg-blue-900/60 text-blue-400 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer"
                             >
@@ -4183,6 +4331,226 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
           onClose={() => setReceiptModalRecord(null)}
           onDownload={() => downloadFeeReceiptPDF(receiptModalRecord, settings)}
         />
+      )}
+
+      {/* Edit Member Modal */}
+      {editingMember && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+          <div className="bg-[#141419] border border-zinc-800 rounded-3xl p-6 max-w-xl w-full shadow-2xl space-y-6 my-8">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
+                  <Edit3 className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white font-mono uppercase tracking-wide">
+                    EDIT MEMBER DETAILS
+                  </h3>
+                  <p className="text-xs text-zinc-400">
+                    Roll Number: <span className="font-mono text-purple-400 font-bold">{editingMember.rollNumber}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingMember(null)}
+                className="w-8 h-8 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {editMemberError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{editMemberError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditMember} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Full Name */}
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={editMemberForm.fullName}
+                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, fullName: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                    required
+                  />
+                </div>
+
+                {/* Phone */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Phone Number
+                  </label>
+                  <input
+                    type="text"
+                    value={editMemberForm.phone}
+                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, phone: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+
+                {/* Email */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={editMemberForm.email}
+                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, email: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                {/* Plan Name */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Selected Plan
+                  </label>
+                  <input
+                    type="text"
+                    value={editMemberForm.planName}
+                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, planName: e.target.value }))}
+                    placeholder="e.g. 1 Month Basic"
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                {/* Member Status */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Member Status
+                  </label>
+                  <select
+                    value={editMemberForm.status}
+                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, status: e.target.value as 'Active' | 'Expired' }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-sans"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Expired">Expired</option>
+                  </select>
+                </div>
+
+                {/* Joining Date */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Joining Date
+                  </label>
+                  <input
+                    type="date"
+                    value={editMemberForm.joiningDate}
+                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, joiningDate: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+
+                {/* Membership Expiry Date */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Membership Expiry Date
+                  </label>
+                  <input
+                    type="date"
+                    value={editMemberForm.membershipExpiry}
+                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, membershipExpiry: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+
+                {/* Gender */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Gender
+                  </label>
+                  <select
+                    value={editMemberForm.gender}
+                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, gender: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-sans"
+                  >
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                {/* Date of Birth */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Date of Birth
+                  </label>
+                  <input
+                    type="date"
+                    value={editMemberForm.dob}
+                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, dob: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+
+                {/* Address */}
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Address
+                  </label>
+                  <input
+                    type="text"
+                    value={editMemberForm.address}
+                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, address: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                {/* Emergency Contact */}
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Emergency Contact
+                  </label>
+                  <input
+                    type="text"
+                    value={editMemberForm.emergencyContact}
+                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, emergencyContact: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingMember(null)}
+                  disabled={isUpdatingMember}
+                  className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingMember}
+                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-black text-xs uppercase tracking-wider rounded-xl transition flex items-center gap-2 shadow-lg shadow-purple-600/20 cursor-pointer"
+                >
+                  {isUpdatingMember ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Saving Changes...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 text-white" />
+                      <span>Save Member Details</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Add Fee Payment Modal */}
