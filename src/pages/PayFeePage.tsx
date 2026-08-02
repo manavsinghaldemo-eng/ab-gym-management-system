@@ -124,99 +124,10 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
   const [feeHistoryRecords, setFeeHistoryRecords] = useState<FeePaymentRecord[]>([]);
   const [historyError, setHistoryError] = useState<string>('');
   const [isLoadingFeeHistory, setIsLoadingFeeHistory] = useState<boolean>(false);
+  const [historyLoaded, setHistoryLoaded] = useState<boolean>(false);
   const [canSubmitNewPayment, setCanSubmitNewPayment] = useState<boolean>(true);
   const [blockingReason, setBlockingReason] = useState<string>('NO_BLOCKING_PAYMENT');
   const [selectedReceiptRecord, setSelectedReceiptRecord] = useState<FeePaymentRecord | null>(null);
-
-  // Portal Navigation & Public History Search State
-  const [activePortalTab, setActivePortalTab] = useState<'pay' | 'publicHistory'>('pay');
-  const [publicSearchQuery, setPublicSearchQuery] = useState<string>('');
-  const [publicStatusFilter, setPublicStatusFilter] = useState<string>('All');
-  const [publicFeeRecords, setPublicFeeRecords] = useState<FeePaymentRecord[]>([]);
-  const [isPublicLoading, setIsPublicLoading] = useState<boolean>(false);
-
-  const loadPublicFeeHistory = useCallback(async (query: string = '') => {
-    setIsPublicLoading(true);
-    try {
-      const localPayments = getStoredPayments();
-      let remotePayments: FeePaymentRecord[] = [];
-
-      try {
-        const cleanQ = query.trim().toUpperCase();
-        const res: any = await api.getMemberFeeHistory({
-          action: 'getMemberFeeHistory',
-          rollNumber: cleanQ,
-          registrationReferenceNumber: cleanQ,
-          referenceOrRollNumber: cleanQ,
-        });
-        if (res && res.history && Array.isArray(res.history)) {
-          remotePayments = res.history;
-        }
-      } catch (err) {
-        console.warn("Remote fee history fetch error, falling back to local payments:", err);
-      }
-
-      const mergedMap = new Map<string, FeePaymentRecord>();
-      remotePayments.forEach((p) => {
-        const key = p.feeReferenceNumber || p.id || Math.random().toString();
-        mergedMap.set(key, p);
-      });
-      localPayments.forEach((p) => {
-        const key = p.feeReferenceNumber || p.id || Math.random().toString();
-        if (!mergedMap.has(key)) {
-          mergedMap.set(key, p);
-        }
-      });
-
-      const localMembers = getStoredMembers();
-      const localRegs = getStoredRegistrations();
-
-      const allMerged = Array.from(mergedMap.values()).map((p) => {
-        const resolvedName = resolveFeeMemberName(p, localMembers, localRegs);
-        return {
-          ...p,
-          memberName: resolvedName,
-          fullName: resolvedName,
-        };
-      });
-      allMerged.sort((a, b) => {
-        const dateA = new Date(a.paymentDate || a.createdDate || a.createdAt || a.timestamp || 0).getTime();
-        const dateB = new Date(b.paymentDate || b.createdDate || b.createdAt || b.timestamp || 0).getTime();
-        return dateB - dateA;
-      });
-
-      setPublicFeeRecords(allMerged);
-    } catch (err) {
-      console.error("Error loading public fee history:", err);
-    } finally {
-      setIsPublicLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadPublicFeeHistory();
-  }, [loadPublicFeeHistory]);
-
-  const filteredPublicRecords = publicFeeRecords.filter((rec) => {
-    const q = publicSearchQuery.trim().toLowerCase();
-    const matchesQuery =
-      !q ||
-      (rec.feeReferenceNumber || '').toLowerCase().includes(q) ||
-      (rec.rollNumber || '').toLowerCase().includes(q) ||
-      (rec.registrationReferenceNumber || rec.registrationRef || '').toLowerCase().includes(q) ||
-      (rec.memberName || rec.fullName || '').toLowerCase().includes(q) ||
-      (rec.phone || rec.memberPhone || rec.phoneNumber || '').toLowerCase().includes(q) ||
-      (rec.upiTransactionId || rec.upiTxnId || '').toLowerCase().includes(q);
-
-    const statusStr = (rec.paymentStatus || rec.status || 'Pending Verification').toLowerCase();
-    const matchesStatus =
-      publicStatusFilter === 'All' ||
-      (publicStatusFilter === 'Successful' && (statusStr === 'approved' || statusStr === 'successful')) ||
-      (publicStatusFilter === 'Pending Verification' && statusStr === 'pending verification') ||
-      (publicStatusFilter === 'Rejected' && statusStr === 'rejected');
-
-    return matchesQuery && matchesStatus;
-  });
 
   // Submission State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -240,6 +151,8 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
     });
     setFeeHistoryRecords([]);
     setHistoryError('');
+    setIsLoadingFeeHistory(false);
+    setHistoryLoaded(false);
     setCanSubmitNewPayment(true);
     setBlockingReason('NO_BLOCKING_PAYMENT');
     setSelectedReceiptRecord(null);
@@ -296,15 +209,15 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
 
   const fetchFeeHistory = async (targetRoll: string, targetRegRef: string) => {
     setIsLoadingFeeHistory(true);
+    setHistoryLoaded(false);
     setHistoryError('');
 
     const normRoll = normalizeId(targetRoll);
     const normRegRef = normalizeId(targetRegRef);
 
-    // Requirement 5: Safe Logging
-    console.log("[Fee History Request] Sent normalized Roll Number:", normRoll);
-    console.log("[Fee History Request] Sent normalized Registration Reference Number:", normRegRef);
-    console.log("[Fee History Request] Backend action name: getMemberFeeHistory");
+    // Safe Logging
+    console.log("Verified roll:", normRoll);
+    console.log("Verified registration ref:", normRegRef);
 
     try {
       const res: any = await api.getMemberFeeHistory({
@@ -346,6 +259,7 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
           const evalRes = evaluateFeePaymentBlockingStorage(sortedLocal);
           setCanSubmitNewPayment(evalRes.canSubmitNewPayment);
           setBlockingReason(evalRes.blockingReason);
+          setHistoryLoaded(true);
           return;
         }
 
@@ -353,38 +267,84 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
         setFeeHistoryRecords([]);
         setCanSubmitNewPayment(false);
         setBlockingReason('HISTORY_UNAVAILABLE');
+        setHistoryLoaded(true);
         return;
       }
 
-      // Requirement 6: Read response.history
+      // Read response.history
       const rawHistory = Array.isArray(res?.history) ? res.history : (Array.isArray(res?.records) ? res.records : (Array.isArray(res?.data) ? res.data : []));
       console.log("[Fee History Response] Number of history records returned:", rawHistory.length);
 
       const fetchedList: FeePaymentRecord[] = Array.isArray(rawHistory) ? rawHistory : [];
 
-      // Merge local storage payments matching normRoll or normRegRef
+      // Merge local storage payments AND local storage registrations matching normRoll or normRegRef
       const localPayments = getStoredPayments();
+      const localRegistrations = getStoredRegistrations();
 
-      const matchedLocal = localPayments.filter((p) => {
-        const pRoll = normalizeId(p.rollNumber);
-        const pReg = normalizeId(p.registrationRef || p.registrationReferenceNumber);
-        const pFeeRef = normalizeId(p.feeReferenceNumber);
-        const pReceipt = normalizeId(p.receiptNumber);
+      const matchedLocalPayments = localPayments.filter((p) => {
+        const pAny = p as any;
+        const pRoll = normalizeId(pAny.rollNumber);
+        const pReg = normalizeId(pAny.registrationRef || pAny.registrationReferenceNumber || pAny.referenceNumber);
+        const pFeeRef = normalizeId(pAny.feeReferenceNumber);
+        const pReceipt = normalizeId(pAny.receiptNumber);
         return (
-          (pRoll !== '' && normRoll !== '' && pRoll === normRoll) ||
-          (pReg !== '' && normRegRef !== '' && pReg === normRegRef) ||
-          (pFeeRef !== '' && (pFeeRef === normRoll || pFeeRef === normRegRef)) ||
-          (pReceipt !== '' && (pReceipt === normRoll || pReceipt === normRegRef))
+          (normRoll !== '' && (pRoll === normRoll || pReg === normRoll || pFeeRef === normRoll || pReceipt === normRoll)) ||
+          (normRegRef !== '' && (pReg === normRegRef || pRoll === normRegRef || pFeeRef === normRegRef || pReceipt === normRegRef))
         );
+      });
+
+      const matchedLocalRegistrations: FeePaymentRecord[] = [];
+      localRegistrations.forEach((r) => {
+        const rAny = r as any;
+        const rRoll = normalizeId(rAny.rollNumber);
+        const rReg = normalizeId(rAny.registrationRef || rAny.registrationReferenceNumber || rAny.referenceNumber || rAny.regRef || rAny.id);
+        const rFeeRef = normalizeId(rAny.feeReferenceNumber);
+        const isMatch =
+          (normRoll !== '' && (rRoll === normRoll || rReg === normRoll || rFeeRef === normRoll)) ||
+          (normRegRef !== '' && (rReg === normRegRef || rRoll === normRegRef || rFeeRef === normRegRef));
+
+        if (isMatch) {
+          const feeAmt = Number(rAny.registrationFee || rAny.amountPaid || rAny.finalFeeAmount || rAny.amount || rAny.feeAmount || 100);
+          const displayRegRef = rAny.registrationRef || rAny.registrationReferenceNumber || rAny.referenceNumber || normRegRef;
+          const displayRoll = rAny.rollNumber || normRoll;
+          matchedLocalRegistrations.push({
+            id: `reg-pay-${rAny.id || displayRegRef}`,
+            source: 'REGISTRATION_PAYMENT',
+            feeReferenceNumber: rAny.feeReferenceNumber || `REG-${displayRegRef}`,
+            registrationReferenceNumber: displayRegRef,
+            rollNumber: displayRoll,
+            fullName: rAny.fullName || '',
+            plan: rAny.selectedPlan || rAny.planName || '',
+            selectedPlan: rAny.selectedPlan || rAny.planName || '',
+            feeMonth: 'Registration',
+            amount: String(feeAmt),
+            feeAmount: feeAmt,
+            currentFeeAmount: feeAmt,
+            amountPaid: feeAmt,
+            paymentMethod: rAny.paymentMethod || 'UPI',
+            transactionId: rAny.upiTransactionId || rAny.upiTxnId || rAny.transactionId || '',
+            upiTransactionId: rAny.upiTransactionId || rAny.upiTxnId || rAny.transactionId || '',
+            paymentDate: rAny.paymentDate || rAny.createdDate || rAny.timestamp || rAny.createdAt || new Date().toISOString().split('T')[0],
+            paymentStatus: rAny.paymentStatus || rAny.status || rAny.registrationStatus || 'Approved',
+            status: rAny.paymentStatus || rAny.status || rAny.registrationStatus || 'Approved',
+            receiptNumber: rAny.receiptNumber || `ABG-REC-${normalizeId(displayRegRef)}`
+          });
+        }
       });
 
       const mergedMap = new Map<string, FeePaymentRecord>();
       fetchedList.forEach((item) => {
-        const key = item.feeReferenceNumber || item.id || Math.random().toString();
+        const key = item.feeReferenceNumber || item.id || `${item.source || 'PAY'}_${item.paymentDate}_${item.amountPaid || item.amount}`;
         mergedMap.set(key, item);
       });
-      matchedLocal.forEach((item) => {
-        const key = item.feeReferenceNumber || item.id || Math.random().toString();
+      matchedLocalPayments.forEach((item) => {
+        const key = item.feeReferenceNumber || item.id || `${item.source || 'PAY'}_${item.paymentDate}_${item.amountPaid || item.amount}`;
+        if (!mergedMap.has(key)) {
+          mergedMap.set(key, item);
+        }
+      });
+      matchedLocalRegistrations.forEach((item) => {
+        const key = item.feeReferenceNumber || item.id || `${item.source || 'PAY'}_${item.paymentDate}_${item.amountPaid || item.amount}`;
         if (!mergedMap.has(key)) {
           mergedMap.set(key, item);
         }
@@ -402,6 +362,7 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
       const evalRes = evaluateFeePaymentBlockingStorage(sortedHistory);
       setCanSubmitNewPayment(evalRes.canSubmitNewPayment);
       setBlockingReason(evalRes.blockingReason);
+      setHistoryLoaded(true);
 
     } catch (err: any) {
       console.error("Error executing getMemberFeeHistory:", err);
@@ -409,8 +370,10 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
       setFeeHistoryRecords([]);
       setCanSubmitNewPayment(false);
       setBlockingReason('HISTORY_UNAVAILABLE');
+      setHistoryLoaded(true);
     } finally {
       setIsLoadingFeeHistory(false);
+      setHistoryLoaded(true);
     }
   };
 
@@ -994,262 +957,8 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
         </p>
       </div>
 
-      {/* Portal Navigation Tabs */}
-      <div className="flex justify-center border-b border-white/10 pb-6">
-        <div className="bg-[#0A0A0A] p-1.5 rounded-2xl border border-white/10 inline-flex items-center gap-2 shadow-2xl">
-          <button
-            type="button"
-            onClick={() => setActivePortalTab('pay')}
-            className={`px-6 py-3 rounded-xl font-mono text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
-              activePortalTab === 'pay'
-                ? 'bg-[#2563EB] text-white shadow-lg shadow-[#2563EB]/25'
-                : 'text-zinc-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <CreditCard className="w-4 h-4" />
-            <span>Pay Membership Fee</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActivePortalTab('publicHistory');
-              loadPublicFeeHistory(publicSearchQuery);
-            }}
-            className={`px-6 py-3 rounded-xl font-mono text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
-              activePortalTab === 'publicHistory'
-                ? 'bg-[#2563EB] text-white shadow-lg shadow-[#2563EB]/25'
-                : 'text-zinc-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <History className="w-4 h-4" />
-            <span>Public Fee History & Receipts</span>
-          </button>
-        </div>
-      </div>
-
-      {/* PUBLIC FEE HISTORY TAB VIEW */}
-      {activePortalTab === 'publicHistory' && (
-        <div className="space-y-6">
-          <div className="bg-[#0A0A0A] border border-white/10 p-6 sm:p-8 rounded-3xl space-y-6 shadow-xl">
-            {/* Title Bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
-              <div>
-                <h2 className="text-xl font-black text-white font-display uppercase tracking-tight flex items-center gap-2">
-                  <Receipt className="w-5 h-5 text-[#2563EB]" />
-                  <span>PUBLIC FEE PAYMENT HISTORY & RECEIPTS</span>
-                </h2>
-                <p className="text-xs text-zinc-400 font-mono mt-1">
-                  Lookup any past gym fee submission, check verification status, or download official payment receipts.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => loadPublicFeeHistory(publicSearchQuery)}
-                disabled={isPublicLoading}
-                className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl text-xs font-mono font-bold text-zinc-200 flex items-center gap-2 transition-colors cursor-pointer self-start sm:self-auto"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isPublicLoading ? 'animate-spin text-blue-400' : ''}`} />
-                <span>Refresh List</span>
-              </button>
-            </div>
-
-            {/* Search Input & Status Filter Controls */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="md:col-span-2 relative">
-                <input
-                  type="text"
-                  value={publicSearchQuery}
-                  onChange={(e) => setPublicSearchQuery(e.target.value)}
-                  placeholder="Search by Roll No, Reg Ref, Fee Ref #, Name, or Mobile..."
-                  className="w-full bg-black border border-white/20 focus:border-[#2563EB] text-white pl-10 pr-10 py-3 rounded-xl text-xs font-mono outline-none transition-colors"
-                />
-                <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3.5" />
-                {publicSearchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setPublicSearchQuery('')}
-                    className="absolute right-3.5 top-3 text-zinc-500 hover:text-white"
-                  >
-                    <XCircle className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-
-              {/* Status Filter Dropdown / Pills */}
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
-                {['All', 'Successful', 'Pending Verification', 'Rejected'].map((status) => (
-                  <button
-                    key={status}
-                    type="button"
-                    onClick={() => setPublicStatusFilter(status)}
-                    className={`px-3 py-2 rounded-xl text-[11px] font-mono font-bold whitespace-nowrap transition-all cursor-pointer ${
-                      publicStatusFilter === status
-                        ? 'bg-[#2563EB] text-white border border-blue-400'
-                        : 'bg-black/60 border border-white/10 text-zinc-400 hover:text-white'
-                    }`}
-                  >
-                    {status}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Results Counter */}
-            <div className="flex items-center justify-between text-xs font-mono text-zinc-400 px-1">
-              <span>Showing {filteredPublicRecords.length} fee payment record(s)</span>
-              {publicSearchQuery && (
-                <span className="text-blue-400">Filter: "{publicSearchQuery}"</span>
-              )}
-            </div>
-
-            {/* Public Fee History Table */}
-            {isPublicLoading ? (
-              <div className="py-16 text-center space-y-3 bg-black/40 rounded-2xl border border-white/5">
-                <Loader2 className="w-8 h-8 text-[#2563EB] animate-spin mx-auto" />
-                <p className="text-xs font-mono text-zinc-400">Loading fee payment records from database & sheets...</p>
-              </div>
-            ) : filteredPublicRecords.length === 0 ? (
-              <div className="py-16 text-center space-y-4 bg-black/40 rounded-2xl border border-white/5 p-6">
-                <FileText className="w-10 h-10 text-zinc-600 mx-auto" />
-                <div className="space-y-1">
-                  <p className="text-sm font-bold text-white font-mono">No Fee Payment Records Found</p>
-                  <p className="text-xs text-zinc-400 max-w-md mx-auto">
-                    No matching fee records found. Search by exact Roll Number (e.g. ABG-26-2432), Registration Reference, or Fee Reference Number.
-                  </p>
-                </div>
-                {(publicSearchQuery || publicStatusFilter !== 'All') && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPublicSearchQuery('');
-                      setPublicStatusFilter('All');
-                    }}
-                    className="px-4 py-2 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 rounded-xl text-xs font-mono text-blue-300 transition-colors cursor-pointer"
-                  >
-                    Reset Search Filters
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="overflow-x-auto rounded-2xl border border-white/10 bg-black/60">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-zinc-900/80 border-b border-white/10 text-[10px] font-mono uppercase tracking-wider text-zinc-400">
-                      <th className="p-3.5">Fee Ref #</th>
-                      <th className="p-3.5">Member Details</th>
-                      <th className="p-3.5">Payment Date & Plan</th>
-                      <th className="p-3.5">Amount & Mode</th>
-                      <th className="p-3.5">Status</th>
-                      <th className="p-3.5 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5 text-xs font-mono">
-                    {filteredPublicRecords.map((record, index) => {
-                      const status = record.paymentStatus || record.status || 'Pending Verification';
-                      const isApproved = status === 'Approved' || status === 'Successful';
-                      const isRejected = status === 'Rejected';
-                      const isPending = status === 'Pending Verification';
-
-                      const dateFormatted = record.paymentDate
-                        ? new Date(record.paymentDate).toLocaleDateString('en-IN', {
-                            day: '2-digit',
-                            month: 'short',
-                            year: 'numeric',
-                          })
-                        : 'N/A';
-
-                      return (
-                        <tr key={record.feeReferenceNumber || record.id || index} className="hover:bg-white/[0.02] transition-colors">
-                          {/* Fee Ref # */}
-                          <td className="p-3.5">
-                            <span className="font-bold text-white font-mono">{record.feeReferenceNumber || 'ABG-FEE-UNKNOWN'}</span>
-                          </td>
-
-                          {/* Member Details */}
-                          <td className="p-3.5 space-y-0.5">
-                            <p className="font-bold text-zinc-100">{record.memberName || record.fullName || 'Member'}</p>
-                            <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-400">
-                              {record.rollNumber && <span>Roll: {record.rollNumber}</span>}
-                              {(record.registrationReferenceNumber || record.registrationRef) && (
-                                <span>Reg: {record.registrationReferenceNumber || record.registrationRef}</span>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Payment Date & Plan */}
-                          <td className="p-3.5 space-y-0.5">
-                            <p className="text-zinc-200">{dateFormatted}</p>
-                            <p className="text-[10px] text-zinc-400">{record.selectedPlan || record.planName || 'Gym Membership Fee'}</p>
-                          </td>
-
-                          {/* Amount & Mode */}
-                          <td className="p-3.5 space-y-0.5">
-                            <p className="font-bold text-emerald-400">₹{record.amountPaid ?? record.finalPayableAmount ?? 0}</p>
-                            <p className="text-[10px] text-zinc-400">{record.paymentMethod || 'UPI'}</p>
-                          </td>
-
-                          {/* Status */}
-                          <td className="p-3.5">
-                            {isApproved && (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                                <CheckCircle2 className="w-3 h-3" />
-                                <span>Approved</span>
-                              </span>
-                            )}
-                            {isPending && (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                                <Clock className="w-3 h-3 animate-pulse" />
-                                <span>Pending Verification</span>
-                              </span>
-                            )}
-                            {isRejected && (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/30">
-                                <AlertCircle className="w-3 h-3" />
-                                <span>Rejected</span>
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Actions */}
-                          <td className="p-3.5 text-right space-x-2">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedReceiptRecord(record)}
-                              className="px-2.5 py-1.5 bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 rounded-lg text-[11px] font-mono transition-colors cursor-pointer inline-flex items-center gap-1"
-                              title="View Official Receipt"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              <span className="hidden sm:inline">Receipt</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => downloadFeeReceiptPDF(record, settings)}
-                              className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-white/10 rounded-lg text-[11px] font-mono transition-colors cursor-pointer inline-flex items-center gap-1"
-                              title="Download Receipt PDF"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              <span className="hidden sm:inline">PDF</span>
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* MEMBER VERIFICATION & PAY FEE TAB VIEW */}
-      {activePortalTab === 'pay' && (
-        <>
-          {/* Member Verification Card */}
-          <div className="bg-[#0A0A0A] border border-white/10 p-6 sm:p-8 rounded-3xl space-y-6 shadow-xl">
+      {/* Member Verification Card */}
+      <div className="bg-[#0A0A0A] border border-white/10 p-6 sm:p-8 rounded-3xl space-y-6 shadow-xl">
         <div className="flex items-center justify-between border-b border-white/10 pb-3">
           <div className="flex items-center gap-2 text-xs font-mono font-bold text-white uppercase tracking-wider">
             <ShieldCheck className="w-4 h-4 text-[#2563EB]" />
@@ -1462,12 +1171,12 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
       {/* Verified Member Details & Fee Submission Form */}
       {verifiedRecord && (
         <div className={`bg-[#0A0A0A] border border-white/10 rounded-3xl p-6 sm:p-10 space-y-8 shadow-2xl relative ${isSubmitting ? 'pointer-events-none opacity-90' : ''}`}>
-          {/* Member Profile Banner */}
+          {/* Section A: Verified Member Profile Banner */}
           <div className="bg-black p-6 rounded-2xl border border-white/20 space-y-4">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-white/10 pb-4">
               <div>
                 <span className="text-[10px] font-bold text-[#2563EB] uppercase tracking-[0.3em] italic block font-mono">
-                  VERIFIED MEMBER RECORD
+                  VERIFIED MEMBER SUMMARY
                 </span>
                 <h2 className="text-2xl font-black text-white font-mono tracking-wider mt-0.5">
                   {verifiedRecord.fullName}
@@ -1496,8 +1205,10 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                 </span>
               </div>
               <div>
-                <span className="text-zinc-500 block text-[11px]">Registered Mobile Digits:</span>
-                <span className="font-bold text-zinc-300">{verifiedPhoneFirst4 || phoneFirst4}</span>
+                <span className="text-zinc-500 block text-[11px]">Registered Mobile:</span>
+                <span className="font-bold text-zinc-300">
+                  {verifiedPhoneFirst4 || phoneFirst4 ? `${verifiedPhoneFirst4 || phoneFirst4}******` : 'N/A'}
+                </span>
               </div>
               <div>
                 <span className="text-zinc-500 block text-[11px]">Current Selected Plan:</span>
@@ -1514,6 +1225,55 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
             </div>
           </div>
 
+          {/* Section B: Membership Status Banner */}
+          <div className="bg-black p-6 rounded-2xl border border-white/20 space-y-3">
+            <div className="flex items-center gap-2 border-b border-white/10 pb-3">
+              <ShieldCheck className="w-4 h-4 text-[#2563EB]" />
+              <h3 className="text-sm font-black text-white font-mono uppercase tracking-wider">
+                MEMBERSHIP STATUS
+              </h3>
+            </div>
+            {(() => {
+              const expDate = verifiedRecord.expiryDate || verifiedRecord.membershipExpiryDate || verifiedRecord.membershipValidUntil || '';
+              const startDt = verifiedRecord.joiningDate || verifiedRecord.membershipStartDate || verifiedRecord.createdDate || verifiedRecord.dateOfJoining || '';
+              const isApproved = verifiedRecord.registrationStatus === 'Approved';
+              const isExpired = expDate ? new Date(expDate).getTime() < new Date().setHours(0,0,0,0) : false;
+
+              if (isExpired) {
+                return (
+                  <div className="p-4 bg-amber-950/60 border border-amber-500/50 rounded-xl flex items-center gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                    <div className="font-mono text-xs">
+                      <p className="font-bold text-amber-300 uppercase">Membership Expired</p>
+                      <p className="text-amber-200/80 text-[11px] mt-0.5">
+                        Your membership valid period ended on <span className="font-bold">{expDate}</span>. Please submit a fee payment below to renew.
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="p-4 bg-emerald-950/60 border border-emerald-500/50 rounded-xl flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 font-mono text-xs">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                    <div>
+                      <p className="font-bold text-emerald-300 uppercase">
+                        Membership Active ({verifiedRecord.registrationStatus || 'Approved'})
+                      </p>
+                      <p className="text-emerald-200/80 text-[11px] mt-0.5">
+                        {expDate ? `Valid until ${expDate}` : 'Membership period active'} {startDt ? `• Joined: ${startDt}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    Active
+                  </span>
+                </div>
+              );
+            })()}
+          </div>
+
           {/* Fee Payment History Section */}
           <div className="bg-black p-6 rounded-2xl border border-white/20 space-y-4">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
@@ -1523,22 +1283,37 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                   FEE PAYMENT HISTORY
                 </h3>
               </div>
-              <span className="text-[10px] font-mono font-bold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-2.5 py-1 rounded-lg">
-                {feeHistoryRecords.length} {feeHistoryRecords.length === 1 ? 'Record' : 'Records'} Found
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono font-bold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-2.5 py-1 rounded-lg">
+                  Total Collection: ₹{feeHistoryRecords
+                    .filter(r => {
+                      const s = String(r.paymentStatus || r.status || '').toLowerCase();
+                      return s !== 'rejected' && s !== 'failed';
+                    })
+                    .reduce((sum, r) => sum + (Number(r.amountPaid) || Number(r.feeAmount) || Number(r.currentFeeAmount) || Number(r.amount) || 0), 0)
+                    .toLocaleString('en-IN')}
+                </span>
+                <span className="text-[10px] font-mono font-bold bg-zinc-800/80 border border-zinc-700 text-zinc-300 px-2.5 py-1 rounded-lg">
+                  {feeHistoryRecords.length} {feeHistoryRecords.length === 1 ? 'Record' : 'Records'} Found
+                </span>
+              </div>
             </div>
 
-            {isLoadingFeeHistory ? (
-              <div className="p-6 space-y-3 animate-pulse bg-zinc-950/60 rounded-xl border border-zinc-800/80">
-                <div className="h-4 bg-zinc-800 rounded w-1/3"></div>
-                <div className="h-10 bg-zinc-900 rounded"></div>
-                <div className="h-10 bg-zinc-900 rounded"></div>
+            {isLoadingFeeHistory || !historyLoaded ? (
+              <div className="p-8 text-center bg-zinc-950/80 rounded-xl border border-zinc-800/80 space-y-3 font-mono">
+                <Loader2 className="w-8 h-8 text-[#2563EB] animate-spin mx-auto" />
+                <p className="text-sm font-bold text-white uppercase tracking-wider">
+                  Checking your previous fee payments...
+                </p>
+                <p className="text-xs text-zinc-400">
+                  Please wait while we verify your past fee records and payment status.
+                </p>
               </div>
             ) : historyError ? (
               <div className="p-4 bg-red-950/80 border border-red-500/50 rounded-xl space-y-3">
                 <div className="flex items-center gap-2 text-red-400 font-bold text-xs font-mono uppercase">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>Fee history is temporarily unavailable. Please try again.</span>
+                  <span>Fee history could not be checked. Please try again before making another payment.</span>
                 </div>
                 <p className="text-xs text-red-200/80 font-sans leading-relaxed">
                   {historyError}
@@ -1598,7 +1373,7 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                       const statusStr = rec.paymentStatus || rec.status || 'Pending Verification';
                       const isSuccess = statusStr === 'Approved' || statusStr === 'Successful' || statusStr === 'Verified';
                       const isRejected = statusStr === 'Rejected';
-                      const amtPaid = rec.amountPaid ?? rec.currentFeeAmount ?? 0;
+                      const amtPaid = Number(rec.amountPaid) || Number(rec.feeAmount) || Number(rec.currentFeeAmount) || Number(rec.amount) || 0;
                       const remBal = rec.remainingBalance ?? 0;
                       const feeMonthDisplay = rec.feeMonth || rec.feePeriod || rec.selectedPlan || 'N/A';
                       const payMethod = rec.paymentMethod || 'UPI';
@@ -1612,6 +1387,15 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                             {receiptNo && receiptNo !== rec.feeReferenceNumber && (
                               <span className="text-[10px] text-zinc-500 font-normal block">
                                 Receipt #{receiptNo}
+                              </span>
+                            )}
+                            {rec.source === 'REGISTRATION_PAYMENT' || rec.feeMonth === 'Registration' ? (
+                              <span className="inline-block text-[9px] font-bold px-1.5 py-0.5 mt-1 rounded bg-purple-950 text-purple-300 border border-purple-500/30 uppercase tracking-wider">
+                                Registration Payment
+                              </span>
+                            ) : (
+                              <span className="inline-block text-[9px] font-bold px-1.5 py-0.5 mt-1 rounded bg-blue-950 text-blue-300 border border-blue-500/30 uppercase tracking-wider">
+                                Fee Payment
                               </span>
                             )}
                           </td>
@@ -1685,16 +1469,117 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
             )}
           </div>
 
-          {/* Pay Fee Form or Blocking Banner */}
-          {isLoadingFeeHistory ? (
-            <div id="pay-fee-form-section" className="p-8 bg-zinc-950/80 border border-zinc-800/80 rounded-2xl space-y-4 animate-pulse shadow-xl">
-              <div className="flex items-center gap-3 text-blue-400 font-mono text-xs font-bold uppercase tracking-wider">
-                <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
-                <span>Checking Fee History & Eligibility...</span>
+          {/* Section D: Available Receipts */}
+          <div className="bg-black p-6 rounded-2xl border border-white/20 space-y-4">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-[#2563EB]" />
+                <h3 className="text-sm font-black text-white font-mono uppercase tracking-wider">
+                  AVAILABLE RECEIPTS
+                </h3>
               </div>
-              <div className="h-4 bg-zinc-800/80 rounded w-1/2" />
-              <div className="h-12 bg-zinc-900/80 rounded-xl" />
-              <div className="h-12 bg-zinc-900/80 rounded-xl" />
+              {(() => {
+                const availableReceipts = feeHistoryRecords.filter((rec) => {
+                  const statusStr = (rec.paymentStatus || rec.status || '').toLowerCase();
+                  return statusStr !== 'rejected' && statusStr !== 'failed';
+                });
+                return (
+                  <span className="text-[10px] font-mono font-bold bg-blue-500/10 border border-blue-500/30 text-blue-400 px-2.5 py-1 rounded-lg">
+                    {availableReceipts.length} {availableReceipts.length === 1 ? 'Receipt' : 'Receipts'} Available
+                  </span>
+                );
+              })()}
+            </div>
+
+            {(() => {
+              const availableReceipts = feeHistoryRecords.filter((rec) => {
+                const statusStr = (rec.paymentStatus || rec.status || '').toLowerCase();
+                return statusStr !== 'rejected' && statusStr !== 'failed';
+              });
+
+              if (isLoadingFeeHistory) {
+                return (
+                  <p className="text-xs text-zinc-500 font-mono italic py-2">
+                    Loading receipts...
+                  </p>
+                );
+              }
+
+              if (availableReceipts.length === 0) {
+                return (
+                  <div className="p-5 text-center bg-zinc-950/70 rounded-xl border border-zinc-800/80 space-y-1">
+                    <p className="text-xs text-zinc-400 font-mono">
+                      No official payment receipts available yet. Official receipts are issued automatically after admin approves your fee payment.
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {availableReceipts.map((rec) => {
+                    const rNo = rec.receiptNumber || rec.feeReferenceNumber || 'ABG-REC';
+                    const amtPaid = rec.amountPaid ?? rec.currentFeeAmount ?? 0;
+                    const pDate = rec.paymentDate || 'N/A';
+                    const pPlan = rec.selectedPlan || rec.feeMonth || 'Standard Plan';
+
+                    return (
+                      <div
+                        key={'receipt-' + (rec.id || rec.feeReferenceNumber)}
+                        className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 hover:border-blue-500/50 transition-colors flex flex-col justify-between gap-3"
+                      >
+                        <div className="space-y-1 font-mono text-xs">
+                          <div className="flex items-center justify-between text-blue-400 font-bold">
+                            <span>Receipt #{rNo}</span>
+                            <span className="text-emerald-400">₹{Number(amtPaid).toLocaleString('en-IN')}</span>
+                          </div>
+                          <div className="text-[11px] text-zinc-400">
+                            Payment Date: <span className="text-zinc-200">{pDate}</span>
+                          </div>
+                          <div className="text-[11px] text-zinc-400">
+                            Plan: <span className="text-zinc-200">{pPlan}</span>
+                          </div>
+                          <div className="text-[11px] text-zinc-400">
+                            Fee Ref #: <span className="text-zinc-300">{rec.feeReferenceNumber || 'N/A'}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-2 border-t border-zinc-900">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedReceiptRecord(rec)}
+                            className="flex-1 py-1.5 px-3 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-500/30 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <Receipt className="w-3.5 h-3.5" />
+                            <span>View Receipt</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => downloadFeeReceiptPDF(rec, getStoredSettings())}
+                            className="flex-1 py-1.5 px-3 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Download PDF</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Section E: New Membership Fee Form or Blocking Banner */}
+          {isLoadingFeeHistory || !historyLoaded ? (
+            <div id="pay-fee-form-section" className="p-8 bg-zinc-950/80 border border-zinc-800/80 rounded-2xl space-y-4 shadow-xl text-center">
+              <div className="flex items-center justify-center gap-3 text-blue-400 font-mono text-xs font-bold uppercase tracking-wider">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+                <span>Checking your previous fee payments...</span>
+              </div>
+              <p className="text-xs text-zinc-400 font-mono">
+                Please wait while we verify your past fee records and payment status.
+              </p>
             </div>
           ) : !canSubmitNewPayment ? (
             <div id="pay-fee-form-section" className="space-y-4">
@@ -1709,7 +1594,7 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                         Membership Fee Already Paid
                       </h3>
                       <p className="text-sm text-emerald-200/90 font-medium leading-relaxed font-sans">
-                        Your membership fee for this period has already been received successfully. No further payment is required.
+                        Your membership fee has already been received successfully. No additional payment is required for this period.
                       </p>
                     </div>
                   </div>
@@ -1727,7 +1612,7 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                         Payment Already Submitted
                       </h3>
                       <p className="text-sm text-amber-200/90 font-medium leading-relaxed font-sans">
-                        Your fee payment has already been submitted and is awaiting admin verification. Please do not make another payment.
+                        Your membership fee payment is awaiting admin verification. Please do not make another payment.
                       </p>
                     </div>
                   </div>
@@ -1742,10 +1627,10 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
                     </div>
                     <div className="space-y-1">
                       <h3 className="text-xl font-black text-white font-mono uppercase tracking-tight">
-                        Fee History Temporarily Unavailable
+                        Fee History Could Not Be Checked
                       </h3>
                       <p className="text-sm text-red-200/90 font-medium leading-relaxed font-sans">
-                        Fee history is temporarily unavailable. Please try again before making a payment.
+                        Fee history could not be checked. Please try again before making another payment.
                       </p>
                     </div>
                   </div>
@@ -1798,8 +1683,8 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
               )}
 
               <h3 className="text-sm font-bold text-white uppercase font-mono tracking-wider border-b border-zinc-800 pb-2 text-blue-400 flex items-center gap-2">
-                <Receipt className="w-4 h-4" />
-                <span>FEE PAYMENT DETAILS</span>
+                <CreditCard className="w-4 h-4" />
+                <span>PAY NEW MEMBERSHIP FEE</span>
               </h3>
 
             {/* Special Offer Badge / Notice */}
@@ -2342,8 +2227,6 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
           </form>
         )}
         </div>
-      )}
-        </>
       )}
 
       {/* Fee Payment Receipt Modal */}

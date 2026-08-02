@@ -973,13 +973,13 @@ export const apiService = {
         const mergedMap = new Map<string, FeePaymentRecord>();
         if (Array.isArray(gasList)) {
           gasList.forEach((item) => {
-            const key = item.feeReferenceNumber || item.id || Math.random().toString();
+            const key = item.feeReferenceNumber || item.id || `${item.source || 'PAY'}_${item.paymentDate}_${item.amountPaid || item.amount}`;
             mergedMap.set(key, item);
           });
         }
         if (Array.isArray(localList)) {
           localList.forEach((item) => {
-            const key = item.feeReferenceNumber || item.id || Math.random().toString();
+            const key = item.feeReferenceNumber || item.id || `${item.source || 'PAY'}_${item.paymentDate}_${item.amountPaid || item.amount}`;
             if (!mergedMap.has(key)) {
               mergedMap.set(key, item);
             }

@@ -93,6 +93,12 @@ export interface RegistrationRequest {
   approvedDate?: string;
   reviewedBy?: string;
   reviewRemarks?: string;
+  amountPaid?: number;
+  finalFeeAmount?: number;
+  transactionId?: string;
+  paymentDate?: string;
+  createdDate?: string;
+  receiptNumber?: string;
   createdAt?: string;
   termsAcceptedAt?: string;
   acceptedAt?: string;
@@ -156,9 +162,14 @@ export interface FeePaymentRecord {
   remainingBalance?: number;
   paymentType?: 'Full Payment' | 'Partial Payment' | string;
   newExpiryDate?: string;
+  feeAmount?: number;
+  source?: 'REGISTRATION_PAYMENT' | 'FEE_PAYMENT' | string;
+  plan?: string;
+  feeMonth?: string;
+  amount?: string;
+  transactionId?: string;
   createdDate?: string;
   createdAt?: string;
-  feeMonth?: string;
   feePeriod?: string;
 }
 

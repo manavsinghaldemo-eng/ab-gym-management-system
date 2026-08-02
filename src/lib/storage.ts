@@ -688,7 +688,7 @@ export function getMemberForFee(data: GetMemberForFeeData): GetMemberForFeeRespo
 }
 
 export function normalizeId(value: any): string {
-  return String(value || '').trim().toUpperCase();
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
 }
 
 export function evaluateFeePaymentBlockingStorage(records: FeePaymentRecord[]): {
@@ -754,6 +754,8 @@ export function getMemberFeeHistory(data: {
   registrationReferenceNumber?: string;
   registrationRef?: string;
   referenceOrRollNumber?: string;
+  phoneFirst4?: string;
+  dateOfBirth?: string;
 }): {
   success: boolean;
   code: string;
@@ -761,13 +763,16 @@ export function getMemberFeeHistory(data: {
   history: FeePaymentRecord[];
   canSubmitNewPayment: boolean;
   blockingReason: string;
+  recordCount: number;
+  sourcesChecked: { registrations: boolean; feePayments: boolean };
 } {
-  const verifiedRoll = normalizeId(data.rollNumber);
-  const verifiedRegRef = normalizeId(
-    data.registrationReferenceNumber || data.registrationRef || data.referenceOrRollNumber
-  );
+  const normRoll = normalizeId(data.rollNumber);
+  const normRegRef = normalizeId(data.registrationReferenceNumber || data.registrationRef);
+  const normRawRef = normalizeId(data.referenceOrRollNumber);
 
-  if (!verifiedRoll && !verifiedRegRef) {
+  const targetIds = Array.from(new Set([normRoll, normRegRef, normRawRef].filter(Boolean)));
+
+  if (targetIds.length === 0) {
     return {
       success: false,
       code: 'INVALID_REQUEST',
@@ -775,49 +780,134 @@ export function getMemberFeeHistory(data: {
       history: [],
       canSubmitNewPayment: false,
       blockingReason: 'NO_BLOCKING_PAYMENT',
+      recordCount: 0,
+      sourcesChecked: { registrations: false, feePayments: false }
     };
   }
 
-  const allPayments = getStoredPayments();
-  let updatedPayments = false;
+  const combinedRecords: FeePaymentRecord[] = [];
+  const sourcesChecked = { registrations: true, feePayments: true };
 
-  const matched = allPayments.filter((p) => {
-    const pRoll = normalizeId(p.rollNumber);
-    const pRef = normalizeId(p.registrationRef || p.registrationReferenceNumber);
-    const pFeeRef = normalizeId(p.feeReferenceNumber);
-    const pReceipt = normalizeId(p.receiptNumber);
-    const pPhone = normalizeId(p.phone || p.phoneNumber || p.memberPhone);
+  // 1. Search Registrations for initial registration fee payment
+  try {
+    const storedRegs = getStoredRegistrations();
+    storedRegs.forEach((r) => {
+      const rAny = r as any;
+      const rRoll = normalizeId(rAny.rollNumber);
+      const rRegRef = normalizeId(rAny.registrationRef || rAny.registrationReferenceNumber || rAny.referenceNumber || rAny.regRef || rAny.id);
 
-    const rollMatch = verifiedRoll !== '' && pRoll !== '' && pRoll === verifiedRoll;
-    const registrationMatch = verifiedRegRef !== '' && pRef !== '' && pRef === verifiedRegRef;
-    const feeRefMatch = (verifiedRoll !== '' && pFeeRef === verifiedRoll) || (verifiedRegRef !== '' && pFeeRef === verifiedRegRef);
-    const receiptMatch = (verifiedRoll !== '' && pReceipt === verifiedRoll) || (verifiedRegRef !== '' && pReceipt === verifiedRegRef);
-    const refOrRollMatch = (verifiedRoll !== '' && (pRoll === verifiedRoll || pRef === verifiedRoll)) ||
-                           (verifiedRegRef !== '' && (pRoll === verifiedRegRef || pRef === verifiedRegRef));
+      const isMatch = targetIds.some(id => (rRoll && rRoll === id) || (rRegRef && rRegRef === id));
 
-    const isMatch = rollMatch || registrationMatch || feeRefMatch || receiptMatch || refOrRollMatch;
+      if (isMatch) {
+        const feeAmt = Number(rAny.registrationFee || rAny.amountPaid || rAny.finalFeeAmount || rAny.amount || rAny.feeAmount || 100);
+        const txnId = rAny.upiTransactionId || rAny.upiTxnId || rAny.transactionId || '';
+        const payMethod = rAny.paymentMethod || 'UPI';
+        const displayRegRef = rAny.registrationRef || rAny.registrationReferenceNumber || rAny.referenceNumber || normRegRef || normRawRef;
+        const displayRoll = rAny.rollNumber || normRoll || normRawRef;
 
-    if (isMatch && verifiedRoll !== '' && (!pRoll || pRoll === 'UNASSIGNED') && pRef === verifiedRegRef) {
-      p.rollNumber = data.rollNumber || verifiedRoll;
-      updatedPayments = true;
-    }
+        const regPayObj: FeePaymentRecord = {
+          id: `reg-pay-${rAny.id || displayRegRef}`,
+          source: 'REGISTRATION_PAYMENT',
+          feeReferenceNumber: rAny.feeReferenceNumber || `REG-${displayRegRef}`,
+          registrationReferenceNumber: displayRegRef,
+          rollNumber: displayRoll,
+          fullName: rAny.fullName || '',
+          plan: rAny.selectedPlan || rAny.planName || '',
+          selectedPlan: rAny.selectedPlan || rAny.planName || '',
+          feeMonth: 'Registration',
+          amount: String(feeAmt),
+          feeAmount: feeAmt,
+          currentFeeAmount: feeAmt,
+          amountPaid: feeAmt,
+          paymentMethod: payMethod,
+          transactionId: txnId,
+          upiTransactionId: txnId,
+          paymentDate: rAny.paymentDate || rAny.createdDate || rAny.timestamp || rAny.createdAt || new Date().toISOString().split('T')[0],
+          paymentStatus: rAny.paymentStatus || rAny.status || rAny.registrationStatus || 'Approved',
+          status: rAny.paymentStatus || rAny.status || rAny.registrationStatus || 'Approved',
+          receiptNumber: rAny.receiptNumber || `ABG-REC-${normalizeId(displayRegRef)}`
+        };
 
-    return isMatch;
-  });
-
-  if (updatedPayments) {
-    savePayments(allPayments);
+        combinedRecords.push(regPayObj);
+      }
+    });
+  } catch (err) {
+    console.error('Error matching registration payments in storage:', err);
   }
 
-  matched.sort((a, b) => {
+  // 2. Search Fee Payments
+  try {
+    const allPayments = getStoredPayments();
+    let updatedPayments = false;
+
+    allPayments.forEach((p) => {
+      const pAny = p as any;
+      const pRoll = normalizeId(pAny.rollNumber);
+      const pRef = normalizeId(pAny.registrationRef || pAny.registrationReferenceNumber || pAny.referenceNumber);
+      const pFeeRef = normalizeId(pAny.feeReferenceNumber);
+      const pReceipt = normalizeId(pAny.receiptNumber);
+
+      const isMatch = targetIds.some(id => 
+        (pRoll && pRoll === id) || 
+        (pRef && pRef === id) || 
+        (pFeeRef && pFeeRef === id) || 
+        (pReceipt && pReceipt === id)
+      );
+
+      if (isMatch) {
+        if (normRoll !== '' && (!pRoll || pRoll === 'UNASSIGNED') && (pRef === normRegRef || pRef === normRawRef)) {
+          p.rollNumber = data.rollNumber || normRoll;
+          updatedPayments = true;
+        }
+
+        combinedRecords.push({
+          ...p,
+          source: p.source || 'FEE_PAYMENT'
+        });
+      }
+    });
+
+    if (updatedPayments) {
+      savePayments(allPayments);
+    }
+  } catch (err) {
+    console.error('Error matching fee payments in storage:', err);
+  }
+
+  // Deduplicate combined records
+  const uniqueRecords: FeePaymentRecord[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const rec of combinedRecords) {
+    const normTxn = normalizeId(rec.transactionId || rec.upiTransactionId);
+    const normFeeRef = normalizeId(rec.feeReferenceNumber);
+    const normRegRef = normalizeId(rec.registrationReferenceNumber || rec.registrationRef);
+    const normAmt = String(rec.amountPaid || rec.feeAmount || rec.amount || '0').trim();
+
+    let key = '';
+    if (normTxn) {
+      key = `TXN_${normTxn}`;
+    } else if (normFeeRef) {
+      key = `FEE_${normFeeRef}`;
+    } else {
+      key = `${rec.source || 'PAY'}_${normRegRef}_${rec.paymentDate}_${normAmt}`;
+    }
+
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      uniqueRecords.push(rec);
+    }
+  }
+
+  uniqueRecords.sort((a, b) => {
     const timeA = new Date(a.paymentDate || a.createdDate || a.createdAt || a.timestamp || 0).getTime();
     const timeB = new Date(b.paymentDate || b.createdDate || b.createdAt || b.timestamp || 0).getTime();
     return timeB - timeA;
   });
 
-  const evaluation = evaluateFeePaymentBlockingStorage(matched);
+  const evaluation = evaluateFeePaymentBlockingStorage(uniqueRecords);
 
-  if (matched.length === 0) {
+  if (uniqueRecords.length === 0) {
     return {
       success: true,
       code: 'NO_FEE_HISTORY',
@@ -825,16 +915,20 @@ export function getMemberFeeHistory(data: {
       history: [],
       canSubmitNewPayment: true,
       blockingReason: 'NO_BLOCKING_PAYMENT',
+      recordCount: 0,
+      sourcesChecked
     };
   }
 
   return {
     success: true,
     code: 'FEE_HISTORY_FOUND',
-    message: `${matched.length} payment records found.`,
-    history: matched,
+    message: `${uniqueRecords.length} payment records found.`,
+    history: uniqueRecords,
     canSubmitNewPayment: evaluation.canSubmitNewPayment,
     blockingReason: evaluation.blockingReason,
+    recordCount: uniqueRecords.length,
+    sourcesChecked
   };
 }
 

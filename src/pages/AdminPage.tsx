@@ -2034,9 +2034,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
             <h1 className="text-2xl font-black text-white font-mono uppercase tracking-tight">
               ADMINISTRATOR LOGIN
             </h1>
-            <p className="text-xs text-zinc-400">
-              Enter your credentials to access live Google Sheets management database
-            </p>
           </div>
 
           {loginError && (
@@ -3447,7 +3444,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   <span className="text-lg font-black text-emerald-400 font-mono">
                     ₹{feePayments
                       .filter(f => isStatusApproved(f.paymentStatus || f.status))
-                      .reduce((sum, f) => sum + (Number(f.amountPaid) || Number(f.finalPayableAmount) || 0), 0)
+                      .reduce((sum, f) => {
+                        const amt = Number(f.amountPaid) || Number(f.feeAmount) || Number(f.currentFeeAmount) || Number(f.amount) || Number(f.finalPayableAmount) || 0;
+                        return sum + amt;
+                      }, 0)
                       .toLocaleString()}
                   </span>
                 </div>
