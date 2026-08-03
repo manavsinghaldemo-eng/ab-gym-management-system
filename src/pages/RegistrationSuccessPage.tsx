@@ -10,6 +10,7 @@ import {
   AlertCircle,
   Sparkles,
 } from 'lucide-react';
+import abGymLogo from '../assets/ab-gym-logo.png';
 
 export interface RegistrationSuccessData {
   registrationReferenceNumber: string;
@@ -42,7 +43,7 @@ export const RegistrationSuccessPage: React.FC<RegistrationSuccessPageProps> = (
         <div className="relative z-10 space-y-4">
           <div className="flex justify-center">
             <img
-              src="/assets/ab-gym-logo.png"
+              src={abGymLogo}
               alt="AB Gym Official Logo"
               referrerPolicy="no-referrer"
               loading="eager"

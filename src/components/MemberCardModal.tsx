@@ -3,6 +3,7 @@ import { Member } from '../types';
 import { getStoredSettings } from '../lib/storage';
 import { downloadMemberCardPDF } from '../lib/pdf';
 import { Dumbbell, Download, X, QrCode, Calendar, Phone, ShieldCheck } from 'lucide-react';
+import abGymLogo from '../assets/ab-gym-logo.png';
 
 interface MemberCardModalProps {
   member: Member;
@@ -39,7 +40,7 @@ export const MemberCardModal: React.FC<MemberCardModalProps> = ({ member, onClos
           <div className="flex justify-between items-center z-10">
             <div className="flex items-center gap-2">
               <img
-                src="/assets/ab-gym-logo.png"
+                src={abGymLogo}
                 alt="AB Gym Official Logo"
                 referrerPolicy="no-referrer"
                 loading="eager"

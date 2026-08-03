@@ -3,6 +3,7 @@ import { FeePaymentRecord } from '../types';
 import { getStoredSettings } from '../lib/storage';
 import { downloadFeeReceiptPDF } from '../lib/pdf';
 import { CheckCircle2, Download, Printer, X, Dumbbell, ShieldCheck } from 'lucide-react';
+import abGymLogo from '../assets/ab-gym-logo.png';
 
 interface ReceiptModalProps {
   record: FeePaymentRecord;
@@ -44,7 +45,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ record, onClose }) =
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
                 <img
-                  src="/assets/ab-gym-logo.png"
+                  src={abGymLogo}
                   alt="AB Gym Official Logo"
                   referrerPolicy="no-referrer"
                   loading="eager"

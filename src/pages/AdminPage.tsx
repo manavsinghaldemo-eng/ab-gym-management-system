@@ -17,6 +17,7 @@ import { MemberCardModal } from '../components/MemberCardModal';
 import { ReceiptModal } from '../components/ReceiptModal';
 import { getStoredSettings, saveSettings } from '../lib/storage';
 import { AB_FITNESS_UPI_ID } from '../data/initialData';
+import abGymLogo from '../assets/ab-gym-logo.png';
 
 import {
   ShieldCheck,
@@ -2151,7 +2152,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
           <div className="text-center space-y-3">
             <div className="flex justify-center">
               <img
-                src="/assets/ab-gym-logo.png"
+                src={abGymLogo}
                 alt="AB Gym Official Logo"
                 referrerPolicy="no-referrer"
                 loading="eager"
@@ -2434,7 +2435,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
             {/* Title & Sync Indicator */}
             <div className="flex items-center gap-3">
               <img
-                src="/assets/ab-gym-logo.png"
+                src={abGymLogo}
                 alt="AB Gym Official Logo"
                 referrerPolicy="no-referrer"
                 loading="eager"
