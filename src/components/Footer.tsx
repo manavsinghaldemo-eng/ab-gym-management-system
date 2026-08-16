@@ -13,7 +13,7 @@ import {
   Heart,
 } from 'lucide-react';
 import { getStoredSettings } from '../lib/storage';
-import abGymLogo from '../assets/ab-gym-logo.png';
+import abGymLogo from '../assets/logo';
 
 interface FooterProps {
   onNavigate: (path: string) => void;

@@ -18,7 +18,7 @@ import { MemberCardModal } from '../components/MemberCardModal';
 import { ReceiptModal } from '../components/ReceiptModal';
 import { getStoredSettings, saveSettings, getStoredAttendance, markMemberAttendance, getStoredMembers, getStoredPlans, updateMemberInStorage, directAddMemberToStorage } from '../lib/storage';
 import { AB_FITNESS_UPI_ID } from '../data/initialData';
-import abGymLogo from '../assets/ab-gym-logo.png';
+import abGymLogo from '../assets/logo';
 
 import {
   ShieldCheck,

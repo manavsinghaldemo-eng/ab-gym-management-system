@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import abGymLogo from '../assets/ab-gym-logo.png';
+import abGymLogo from '../assets/logo';
 
 interface LoadingScreenProps {
   message?: string;

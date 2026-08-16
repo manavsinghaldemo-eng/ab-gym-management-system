@@ -3,7 +3,7 @@ import { Member } from '../types';
 import { getStoredSettings } from '../lib/storage';
 import { downloadMemberCardPDF } from '../lib/pdf';
 import { Dumbbell, Download, X, QrCode, Calendar, Phone, ShieldCheck } from 'lucide-react';
-import abGymLogo from '../assets/ab-gym-logo.png';
+import abGymLogo from '../assets/logo';
 
 interface MemberCardModalProps {
   member: Member;

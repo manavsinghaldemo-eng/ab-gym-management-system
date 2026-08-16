@@ -3,7 +3,7 @@ import { FeePaymentRecord } from '../types';
 import { getStoredSettings } from '../lib/storage';
 import { downloadFeeReceiptPDF } from '../lib/pdf';
 import { CheckCircle2, Download, Printer, X, Dumbbell, ShieldCheck } from 'lucide-react';
-import abGymLogo from '../assets/ab-gym-logo.png';
+import abGymLogo from '../assets/logo';
 
 interface ReceiptModalProps {
   record: FeePaymentRecord;

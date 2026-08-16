@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { getStoredSettings, STORAGE_EVENT } from '../lib/storage';
 import { GymSettings } from '../types';
-import abGymLogo from '../assets/ab-gym-logo.png';
+import abGymLogo from '../assets/logo';
 
 interface NavbarProps {
   currentPath: string;

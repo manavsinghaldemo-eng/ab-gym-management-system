@@ -7,7 +7,7 @@ import {
   Receipt,
   ShieldCheck,
 } from 'lucide-react';
-import abGymLogo from '../assets/ab-gym-logo.png';
+import abGymLogo from '../assets/logo';
 
 export interface FeePaymentSuccessData {
   feeReferenceNumber: string;
