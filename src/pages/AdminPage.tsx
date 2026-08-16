@@ -1161,16 +1161,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
         adminName: 'Admin',
       };
 
-      console.log('SUBMITTING DIRECT MEMBER REGISTRATION / RESTORATION:', payload);
+      console.log('[ADMIN] SUBMITTING DIRECT MEMBER REGISTRATION / RESTORATION:', payload);
       const res = await apiService.directAddMember(payload);
-      console.log('Direct Add / Restoration Result:', res);
+      console.log('[ADMIN] Direct Add / Restoration Result:', res);
 
-      const addedMember: Member = res.data || res.member;
+      if (!res || res.success !== true) {
+        throw new Error(res?.message || 'Failed to save member to Google Sheets.');
+      }
+
+      const addedMember: Member = (res && (res.data || res.member)) ? (res.data || res.member) : null;
 
       if (addedMember) {
         setMembers(prev => {
-          const exists = prev.some(m => m.rollNumber === addedMember.rollNumber);
-          return exists ? prev.map(m => m.rollNumber === addedMember.rollNumber ? addedMember : m) : [addedMember, ...prev];
+          const targetRoll = (addedMember.rollNumber || '').trim().toUpperCase();
+          const exists = prev.some(m => (m.rollNumber || '').trim().toUpperCase() === targetRoll);
+          return exists
+            ? prev.map(m => (m.rollNumber || '').trim().toUpperCase() === targetRoll ? addedMember : m)
+            : [addedMember, ...prev];
         });
       }
 
@@ -1186,7 +1193,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       } catch {}
 
       setMemberSuccessToast({
-        message: `Member ${name} (${addedMember?.rollNumber || 'Active'}) directly registered/restored successfully.`,
+        message: `Member added successfully. ${name} (${addedMember?.rollNumber || 'Active'}) has been enrolled.`,
         memberName: name,
         rollNumber: addedMember?.rollNumber,
       });
@@ -1208,7 +1215,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       });
     } catch (err: any) {
       console.error('Failed to add member directly:', err);
-      setDirectAddError(err.message || 'Failed to register/restore member.');
+      setDirectAddError(`Unable to save. ${err.message || String(err)}`);
     } finally {
       setIsSubmittingDirectAdd(false);
     }
@@ -2221,6 +2228,85 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     });
   };
 
+  // Helper: Open Pay Fee modal for a specific member or empty
+  const handleOpenAddFeeForMember = (member?: Member) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (member) {
+      const selectedPlan = member.planName || 'Standard Plan';
+      const planInfo = parsePlanDetails(selectedPlan);
+      const regularAmount = planInfo.planAmount || getPlanAmount(selectedPlan) || 500;
+      const prevBalance = Number(member.previousBalance ?? 0);
+      const defaultDurationLabel = planInfo.durationLabel;
+      const feeMonthStr = generateFeeMonthStr(defaultDurationLabel, todayStr);
+
+      const parsedPriceType = ((member as any).feePriceType || 'Regular Price') as 'Regular Price' | 'Offer Price' | 'Custom Price';
+      const parsedFinalFee = (member as any).finalFeeAmount ? Number((member as any).finalFeeAmount) : regularAmount;
+      const resolvedFeeAmount = parsedPriceType !== 'Regular Price' ? parsedFinalFee : regularAmount;
+      const totalPayable = Math.max(0, resolvedFeeAmount + prevBalance);
+
+      setAddFeeForm({
+        referenceOrRollNumber: member.rollNumber || member.registrationRef || '',
+        fullName: member.fullName || '',
+        phoneNumber: member.phone || '',
+        emailAddress: member.email || '',
+        selectedPlan: selectedPlan,
+        feeDuration: defaultDurationLabel,
+        feeCalculationMode: parsedPriceType !== 'Regular Price' ? 'Custom Amount' : 'Auto Calculate',
+        feePriceType: parsedPriceType,
+        regularPlanAmount: regularAmount,
+        finalFeeAmount: String(parsedFinalFee),
+        offerNote: (member as any).offerNote || '',
+        offerValidFrom: (member as any).offerValidFrom || '',
+        offerValidUntil: (member as any).offerValidUntil || '',
+        savePriceForFuture: false,
+        originalPlanAmount: regularAmount,
+        originalPlanDuration: planInfo.durationMonths,
+        feeMonth: feeMonthStr,
+        feeAmount: String(resolvedFeeAmount),
+        previousBalance: String(prevBalance),
+        discount: '0',
+        paymentType: 'Full Payment',
+        amountPaid: String(totalPayable),
+        paymentMethod: 'Cash',
+        upiTransactionId: '',
+        paymentDate: todayStr,
+        adminRemarks: '',
+      });
+    } else {
+      setAddFeeForm({
+        referenceOrRollNumber: '',
+        fullName: '',
+        phoneNumber: '',
+        emailAddress: '',
+        selectedPlan: '',
+        feeDuration: '1 Month',
+        feeCalculationMode: 'Auto Calculate',
+        feePriceType: 'Regular Price',
+        regularPlanAmount: 0,
+        finalFeeAmount: '',
+        offerNote: '',
+        offerValidFrom: '',
+        offerValidUntil: '',
+        savePriceForFuture: false,
+        originalPlanAmount: 0,
+        originalPlanDuration: 1,
+        feeMonth: '',
+        feeAmount: '',
+        previousBalance: '0',
+        discount: '0',
+        paymentType: 'Full Payment',
+        amountPaid: '',
+        paymentMethod: 'Cash',
+        upiTransactionId: '',
+        paymentDate: todayStr,
+        adminRemarks: '',
+      });
+    }
+    setSearchMemberError('');
+    setSubmitFeeError('');
+    setIsAddFeeModalOpen(true);
+  };
+
   // Actions: Search Member For Fee
   const handleSearchMemberForFee = async () => {
     const rawQuery = (addFeeForm.referenceOrRollNumber || '').trim();
@@ -2566,7 +2652,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     };
 
     try {
+      console.log('[ADMIN] SUBMITTING ADMIN FEE PAYMENT:', payload);
       const result = await apiService.adminSubmitFeePayment(payload);
+      console.log('[ADMIN] Admin Fee Payment Result:', result);
+
+      if (!result || result.success !== true) {
+        throw new Error(result?.message || 'Failed to record fee payment on Google Sheets.');
+      }
 
       setIsAddFeeModalOpen(false);
 
@@ -2575,18 +2667,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       const finalRemainingBal = result.remainingBalance !== undefined ? Number(result.remainingBalance) : remainingBalance;
 
       setFeeSuccessToast({
-        message: result.message || `Fee payment submitted successfully! Receipt #: ${receiptNumber} | Remaining Balance: ₹${finalRemainingBal.toLocaleString("en-IN")}`,
+        message: result.message || `Payment recorded successfully. Receipt #: ${receiptNumber} | Remaining Balance: ₹${finalRemainingBal.toLocaleString("en-IN")}`,
         receiptNumber,
         receiptUrl,
       });
 
       await Promise.all([
         fetchFeePayments(),
+        fetchMembers(),
         fetchDashboard(),
         fetchActivityLogs(),
       ]);
     } catch (err: any) {
-      setSubmitFeeError(err.message || 'Failed to submit fee payment.');
+      setSubmitFeeError(`Unable to save. ${err.message || String(err)}`);
     } finally {
       setIsSubmittingFee(false);
     }
@@ -3027,6 +3120,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
             {/* Quick Actions */}
             <div className="flex items-center gap-2 sm:gap-3">
+              <button
+                type="button"
+                onClick={() => handleOpenAddFeeForMember()}
+                className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-900/40 transition-all cursor-pointer"
+                title="Record Member Fee Payment"
+              >
+                <IndianRupee className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">+ Pay Fee</span>
+                <span className="sm:hidden">+ Fee</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleOpenDirectAddModal}
@@ -3804,6 +3908,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
+                                handleOpenAddFeeForMember(m);
+                              }}
+                              className="px-2.5 py-1.5 bg-emerald-950/60 border border-emerald-500/30 hover:bg-emerald-900/60 text-emerald-400 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer"
+                              title="Collect / Record Fee Payment"
+                            >
+                              <IndianRupee className="w-3.5 h-3.5" />
+                              <span>Pay Fee</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 handleEditMember(m);
                               }}
                               className="px-2.5 py-1.5 bg-purple-950/60 border border-purple-500/30 hover:bg-purple-900/60 text-purple-300 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer"
@@ -3870,28 +3987,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setAddFeeForm({
-                      referenceOrRollNumber: '',
-                      fullName: '',
-                      phoneNumber: '',
-                      emailAddress: '',
-                      selectedPlan: '',
-                      feeMonth: '',
-                      feeAmount: '',
-                      previousBalance: '0',
-                      discount: '0',
-                      totalPaid: '',
-                      paymentMethod: 'Cash',
-                      upiTransactionId: '',
-                      paymentDate: new Date().toISOString().split('T')[0],
-                      adminRemarks: '',
-                    });
-                    setSearchMemberError('');
-                    setSubmitFeeError('');
-                    setIsAddFeeModalOpen(true);
-                  }}
-                  className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs uppercase tracking-wider rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 whitespace-nowrap"
+                  onClick={() => handleOpenAddFeeForMember()}
+                  className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs uppercase tracking-wider rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 whitespace-nowrap cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   Add Fee Payment
@@ -6035,76 +6132,119 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
             )}
 
             <form onSubmit={handleSubmitAddFeePayment} className="space-y-4">
-              {/* Member Lookup Section */}
+              {/* Member Selection / Search Section */}
               <div className="p-4 bg-[#0F0F12] border border-zinc-800/80 rounded-2xl space-y-3">
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                  1. Roll Number or Registration Reference *
-                </label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type="text"
-                      value={addFeeForm.referenceOrRollNumber || ''}
-                      onChange={(e) => {
-                        setAddFeeForm({ ...addFeeForm, referenceOrRollNumber: e.target.value });
-                        if (searchMemberError) setSearchMemberError('');
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleSearchMemberForFee();
-                        }
-                      }}
-                      placeholder="Enter Roll Number or Reg Ref (e.g., ABG-101 or REG-...)"
-                      className="w-full bg-[#141419] border border-zinc-800 rounded-xl pl-3.5 pr-8 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 font-mono transition-all"
-                      required
-                    />
-                    {addFeeForm.referenceOrRollNumber && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAddFeeForm({
-                            ...addFeeForm,
-                            referenceOrRollNumber: '',
-                            fullName: '',
-                            phoneNumber: '',
-                            emailAddress: '',
-                            selectedPlan: '',
-                          });
+                {/* 1. Direct Member Directory Dropdown */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5" />
+                      <span>Select Enrolled Member</span>
+                    </label>
+                    <span className="text-[10px] text-zinc-500 font-mono">
+                      {members.length} members available
+                    </span>
+                  </div>
+                  <select
+                    value={addFeeForm.referenceOrRollNumber || ''}
+                    onChange={(e) => {
+                      const selectedVal = e.target.value;
+                      if (!selectedVal) return;
+                      const matched = members.find(m => (m.rollNumber === selectedVal || m.registrationRef === selectedVal));
+                      if (matched) {
+                        handleOpenAddFeeForMember(matched);
+                      } else {
+                        setAddFeeForm(prev => ({ ...prev, referenceOrRollNumber: selectedVal }));
+                      }
+                    }}
+                    className="w-full bg-[#141419] border border-zinc-800 hover:border-zinc-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-sans transition-all cursor-pointer"
+                  >
+                    <option value="">-- Choose from member directory --</option>
+                    {members.map((m) => (
+                      <option key={m.id || m.rollNumber} value={m.rollNumber || m.registrationRef}>
+                        {m.rollNumber ? `[${m.rollNumber}] ` : ''}{m.fullName} - {m.planName || 'Plan'} {Number(m.previousBalance || 0) > 0 ? `(Due: ₹${m.previousBalance})` : `(Bal: ₹0)`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px bg-zinc-800" />
+                  <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">or search by ID / phone</span>
+                  <div className="flex-1 h-px bg-zinc-800" />
+                </div>
+
+                {/* 2. Manual Search Input */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1.5">
+                    Roll Number, Reference ID, Name or Phone *
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={addFeeForm.referenceOrRollNumber || ''}
+                        onChange={(e) => {
+                          setAddFeeForm({ ...addFeeForm, referenceOrRollNumber: e.target.value });
                           if (searchMemberError) setSearchMemberError('');
                         }}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-0.5"
-                        title="Clear input"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSearchMemberForFee();
+                          }
+                        }}
+                        placeholder="Enter Roll Number or Reg Ref (e.g., ABG-101 or REG-...)"
+                        className="w-full bg-[#141419] border border-zinc-800 rounded-xl pl-3.5 pr-8 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 font-mono transition-all"
+                        required
+                      />
+                      {addFeeForm.referenceOrRollNumber && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAddFeeForm({
+                              ...addFeeForm,
+                              referenceOrRollNumber: '',
+                              fullName: '',
+                              phoneNumber: '',
+                              emailAddress: '',
+                              selectedPlan: '',
+                            });
+                            if (searchMemberError) setSearchMemberError('');
+                          }}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-0.5"
+                          title="Clear input"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSearchMemberForFee}
+                      disabled={isSearchingMember || !addFeeForm.referenceOrRollNumber.trim()}
+                      className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer shadow-md shadow-emerald-600/20 active:scale-95"
+                    >
+                      {isSearchingMember ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                          <span>Searching...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Search className="w-3.5 h-3.5 text-white" />
+                          <span>Search Member</span>
+                        </>
+                      )}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleSearchMemberForFee}
-                    disabled={isSearchingMember || !addFeeForm.referenceOrRollNumber.trim()}
-                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer shadow-md shadow-emerald-600/20 active:scale-95"
-                  >
-                    {isSearchingMember ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                        <span>Searching...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Search className="w-3.5 h-3.5 text-white" />
-                        <span>Search Member</span>
-                      </>
-                    )}
-                  </button>
+                  {searchMemberError && (
+                    <p className="text-[11px] text-amber-400 font-sans flex items-center gap-1 mt-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{searchMemberError}</span>
+                    </p>
+                  )}
                 </div>
-                {searchMemberError && (
-                  <p className="text-[11px] text-amber-400 font-sans flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>{searchMemberError}</span>
-                  </p>
-                )}
               </div>
 
               {/* Read-Only Member Info */}

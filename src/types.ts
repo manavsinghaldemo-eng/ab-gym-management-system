@@ -50,9 +50,11 @@ export interface Member {
   medicalCondition?: string;
   remarks?: string;
   avatarUrl?: string;
+  idCardUrl?: string;
   termsAccepted?: boolean;
   termsAcceptedAt?: string;
   createdBy?: string;
+  createdAt?: string;
   updatedAt?: string;
 }
 

@@ -523,6 +523,17 @@ async function fallbackAppsScriptBackend<T>(
     return updateMemberInStorage(data as any) as any;
   }
 
+  if (action === 'directAddMember') {
+    const directMember = directAddMemberToStorage(data as any);
+    return {
+      success: true,
+      message: 'Member added/restored successfully.',
+      data: directMember,
+      member: directMember,
+      rollNumber: directMember.rollNumber,
+    } as any;
+  }
+
   return {
     success: true,
     message: `Action '${action}' completed in fallback mode.`,
@@ -1372,99 +1383,296 @@ export const apiService = {
   },
 
   directAddMember: async (memberData: any, token?: string) => {
-    const localMember = directAddMemberToStorage(memberData);
+    const adminToken = token || localStorage.getItem("abFitnessAdminToken") || getSavedAdminToken();
+    const cleanPhone = String(memberData.phone || memberData.phoneNumber || '').replace(/\D/g, '');
+    const cleanEmail = String(memberData.email || memberData.emailAddress || '').trim();
+    const name = String(memberData.fullName || memberData.name || '').trim();
+    const plan = memberData.selectedPlan || memberData.planName || 'Monthly Plan';
+
+    console.log('[ADMIN] Action started');
+    console.log('[ADMIN] ACTION: directAddMember');
+    console.log('[ADMIN] REQUEST URL:', getScriptUrl());
+    console.log('[ADMIN] REQUEST PAYLOAD:', memberData);
+
+    const scriptUrl = getScriptUrl();
+
+    // Strategy 1: Try directAddMember if supported
     try {
       const payload = {
         action: 'directAddMember',
+        token: adminToken,
         ...memberData,
-        rollNumber: localMember.rollNumber,
-        rollNo: localMember.rollNumber,
-        registrationRef: localMember.registrationRef,
-        registrationReferenceNumber: localMember.registrationRef,
-      };
-      const res = await callAdminApi('directAddMember', payload, token);
-      if (res && (res.success || res.status === 'success' || res.status === 'Approved' || res.status === 'ok')) {
-        return {
-          ...res,
-          success: true,
-          data: localMember,
-          member: localMember,
-          message: res.message || 'Member added/restored successfully.',
-        };
-      }
-    } catch (err) {
-      console.warn('callAdminApi directAddMember failed, using local storage result:', err);
-    }
-    return {
-      success: true,
-      data: localMember,
-      member: localMember,
-      message: 'Member added/restored successfully.',
-    };
-  },
-
-  adminSubmitFeePayment: async (formData: any) => {
-    try {
-      const scriptUrl = getScriptUrl();
-      const payload = formData.action === "adminSubmitFeePayment" ? formData : {
-        action: "adminSubmitFeePayment",
-        token: localStorage.getItem("abFitnessAdminToken") || getSavedAdminToken(),
-        referenceOrRollNumber: (formData.referenceOrRollNumber || '').trim(),
-        memberName: (formData.memberName || formData.fullName || '').trim(),
-        fullName: (formData.fullName || formData.memberName || '').trim(),
-        phone: (formData.phone || formData.phoneNumber || '').trim(),
-        phoneNumber: (formData.phoneNumber || formData.phone || '').trim(),
-        email: (formData.email || formData.emailAddress || '').trim(),
-        emailAddress: (formData.emailAddress || formData.email || '').trim(),
-        selectedPlan: formData.selectedPlan || '',
-        feeDuration: formData.feeDuration || '1 Month',
-        feeCalculationMode: formData.feeCalculationMode || 'Auto Calculate',
-        feePriceType: formData.feePriceType || 'Regular Price',
-        regularPlanAmount: Number(formData.regularPlanAmount || 0),
-        finalFeeAmount: Number(formData.finalFeeAmount ?? formData.feeAmount ?? 0),
-        offerNote: (formData.offerNote || '').trim(),
-        offerValidFrom: formData.offerValidFrom || '',
-        offerValidUntil: formData.offerValidUntil || '',
-        savePriceForFuture: Boolean(formData.savePriceForFuture),
-        feeMonth: formData.feeMonth || '',
-        feeAmount: Number(formData.feeAmount || 0),
-        previousBalance: Number(formData.previousBalance || 0),
-        discount: Number(formData.discount || 0),
-        totalPaid: Number(formData.amountPaid ?? formData.totalPaid ?? 0),
-        paymentType: formData.paymentType || 'Full Payment',
-        paymentMethod: formData.paymentMethod || 'Cash',
-        upiTransactionId:
-          formData.paymentMethod === "UPI"
-            ? (formData.upiTransactionId || '').trim()
-            : "",
-        paymentDate: formData.paymentDate || '',
-        adminRemarks: (formData.adminRemarks || '').trim(),
+        fullName: name,
+        phone: cleanPhone,
+        phoneNumber: cleanPhone,
+        email: cleanEmail,
+        emailAddress: cleanEmail,
+        selectedPlan: plan,
+        planName: plan,
       };
 
+      console.log('[ADMIN] Sending directAddMember request...');
       const response = await fetch(scriptUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload),
       });
 
-      if (response.ok) {
-        const text = await response.text();
-        const json = JSON.parse(text);
-        const isSuccess =
-          json.success === true ||
-          json.status === 'success' ||
-          json.status === 'Successful' ||
-          json.result === 'success';
+      console.log('[ADMIN] HTTP status:', response.status);
+      const rawText = await response.text();
+      console.log('[ADMIN] Raw response:', rawText);
 
-        if (isSuccess) {
-          return json;
-        }
+      let json: any;
+      try {
+        json = JSON.parse(rawText);
+      } catch {
+        json = null;
       }
-    } catch (err) {
-      console.warn("GAS adminSubmitFeePayment failed or unavailable, using local database fallback:", err);
-    }
+      console.log('[ADMIN] Parsed response:', json);
 
-    return fallbackAdminSubmitFeePayment(formData);
+      if (json && (json.success === true || json.status === 'success')) {
+        console.log('[ADMIN] Backend success: true');
+        console.log('[ADMIN] Google Sheet save confirmed');
+        const savedMember = json.data || json.member || {
+          ...memberData,
+          rollNumber: json.rollNumber || json.data?.rollNumber,
+          registrationRef: json.registrationReferenceNumber || json.registrationRef,
+          fullName: name,
+          phone: cleanPhone,
+        };
+        directAddMemberToStorage(savedMember);
+        return {
+          success: true,
+          data: savedMember,
+          member: savedMember,
+          rollNumber: savedMember.rollNumber,
+          message: json.message || `Member ${name} added successfully.`,
+        };
+      }
+
+      // If backend says Invalid action: directAddMember or Unknown action, use the robust 2-step Google Sheets API flow:
+      if (json && typeof json.message === 'string' && (json.message.includes('Invalid action') || json.message.includes('Unknown action') || json.message.includes('not found'))) {
+        console.log('[ADMIN] directAddMember action not recognized on deployed script, executing standard 2-step Google Sheets flow: submitRegistration -> approveRegistration');
+
+        // Step 1: submitRegistration
+        const regPayload = {
+          action: 'submitRegistration',
+          fullName: name,
+          gender: memberData.gender || 'Male',
+          dob: memberData.dob || memberData.dateOfBirth || '',
+          dateOfBirth: memberData.dob || memberData.dateOfBirth || '',
+          phone: cleanPhone,
+          phoneNumber: cleanPhone,
+          email: cleanEmail,
+          emailAddress: cleanEmail,
+          address: memberData.address || '',
+          emergencyContact: memberData.emergencyContact || memberData.emergencyContactNumber || '',
+          emergencyContactNumber: memberData.emergencyContact || memberData.emergencyContactNumber || '',
+          selectedPlan: plan,
+          planName: plan,
+          joiningDate: memberData.joiningDate || new Date().toISOString().split('T')[0],
+          paymentMethod: memberData.paymentMethod || 'Cash',
+          registrationFee: Number(memberData.registrationFee || 100),
+          fitnessGoal: memberData.fitnessGoal || 'General Fitness',
+          termsAccepted: true,
+          entrySource: 'Admin Panel',
+          createdBy: 'Admin',
+        };
+
+        const regRes = await fetch(scriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(regPayload),
+        });
+
+        const regText = await regRes.text();
+        const regJson = JSON.parse(regText);
+        console.log('[ADMIN] submitRegistration parsed response:', regJson);
+
+        if (!regJson || !regJson.success) {
+          throw new Error(regJson?.message || 'Failed to create member registration on Google Sheets.');
+        }
+
+        const regRef = regJson.registrationReferenceNumber || regJson.registrationRef;
+
+        // Step 2: approveRegistration
+        const approvePayload = {
+          action: 'approveRegistration',
+          token: adminToken,
+          registrationReferenceNumber: regRef,
+          registrationRef: regRef,
+          adminRemarks: memberData.remarks || 'Directly enrolled and verified by Admin',
+          adminName: memberData.adminName || 'Admin',
+          customRollNumber: memberData.rollNumber ? memberData.rollNumber.trim().toUpperCase() : undefined,
+        };
+
+        const appRes = await fetch(scriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(approvePayload),
+        });
+
+        const appText = await appRes.text();
+        const appJson = JSON.parse(appText);
+        console.log('[ADMIN] approveRegistration parsed response:', appJson);
+
+        if (!appJson || !appJson.success) {
+          throw new Error(appJson?.message || 'Member registered, but approval failed on Google Sheets.');
+        }
+
+        const finalRoll = appJson.rollNumber || memberData.rollNumber;
+        console.log('[ADMIN] Backend success: true');
+        console.log('[ADMIN] Google Sheet save confirmed with Roll Number:', finalRoll);
+
+        const memberObj: Member = {
+          id: `mem-${Date.now()}`,
+          registrationRef: regRef,
+          rollNumber: finalRoll,
+          fullName: name,
+          phone: cleanPhone,
+          email: cleanEmail,
+          gender: memberData.gender || 'Male',
+          dateOfBirth: memberData.dob || memberData.dateOfBirth || '',
+          dob: memberData.dob || memberData.dateOfBirth || '',
+          address: memberData.address || '',
+          emergencyContact: memberData.emergencyContact || memberData.emergencyContactNumber || '',
+          planName: plan,
+          selectedPlan: plan,
+          fitnessGoal: memberData.fitnessGoal || '',
+          status: 'Active',
+          membershipStatus: 'Active',
+          joiningDate: memberData.joiningDate || new Date().toISOString().split('T')[0],
+          membershipExpiry: memberData.membershipExpiry || '',
+          registrationFeePaid: Number(memberData.registrationFee || 100),
+          idCardUrl: appJson.idCardUrl || '',
+          createdAt: new Date().toISOString(),
+          lastPaymentDate: new Date().toISOString().split('T')[0],
+          lastPaymentAmount: Number(memberData.registrationFee || 100),
+        };
+
+        directAddMemberToStorage(memberObj);
+
+        return {
+          success: true,
+          data: memberObj,
+          member: memberObj,
+          rollNumber: finalRoll,
+          registrationReferenceNumber: regRef,
+          idCardUrl: appJson.idCardUrl,
+          message: `Member ${name} (${finalRoll}) saved and approved in Google Sheets successfully!`,
+        };
+      }
+
+      const errMsg = json?.message || json?.error || 'Operation failed on Google Sheets backend.';
+      console.error('[ADMIN] SAVE FAILED');
+      console.error('[ADMIN] Error:', errMsg);
+      throw new Error(errMsg);
+    } catch (err: any) {
+      console.error('[ADMIN] SAVE FAILED');
+      console.error('[ADMIN] Error:', err.message || err);
+      throw err;
+    }
+  },
+
+  adminSubmitFeePayment: async (formData: any) => {
+    const adminToken = formData.token || localStorage.getItem("abFitnessAdminToken") || getSavedAdminToken();
+    const memberId = (formData.referenceOrRollNumber || formData.rollNumber || formData.registrationRef || '').trim();
+    const cleanPhone = String(formData.phone || formData.phoneNumber || '').replace(/\D/g, '');
+    const cleanEmail = String(formData.email || formData.emailAddress || '').trim();
+    const name = String(formData.memberName || formData.fullName || '').trim();
+    const feeAmount = Number(formData.feeAmount || 0);
+    const amountPaid = Number(formData.amountPaid ?? formData.totalPaid ?? formData.feeAmount ?? 0);
+    const totalPaid = Number(formData.totalPaid ?? formData.amountPaid ?? formData.feeAmount ?? 0);
+    const previousBalance = Number(formData.previousBalance || 0);
+    const discount = Number(formData.discount || 0);
+
+    const payload = {
+      action: "adminSubmitFeePayment",
+      token: adminToken,
+      referenceOrRollNumber: memberId,
+      rollNumber: formData.rollNumber || memberId,
+      registrationRef: formData.registrationRef || memberId,
+      memberName: name,
+      fullName: name,
+      phone: cleanPhone,
+      phoneNumber: cleanPhone,
+      email: cleanEmail,
+      emailAddress: cleanEmail,
+      selectedPlan: formData.selectedPlan || 'Monthly Plan',
+      feeDuration: formData.feeDuration || '1 Month',
+      feeCalculationMode: formData.feeCalculationMode || 'Auto Calculate',
+      feePriceType: formData.feePriceType || 'Regular Price',
+      regularPlanAmount: Number(formData.regularPlanAmount || feeAmount),
+      finalFeeAmount: Number(formData.finalFeeAmount ?? feeAmount),
+      offerNote: (formData.offerNote || '').trim(),
+      offerValidFrom: formData.offerValidFrom || '',
+      offerValidUntil: formData.offerValidUntil || '',
+      savePriceForFuture: Boolean(formData.savePriceForFuture),
+      feeMonth: formData.feeMonth || `${new Date().toLocaleString('default', { month: 'long' })} ${new Date().getFullYear()}`,
+      feeAmount,
+      previousBalance,
+      discount,
+      amountPaid,
+      totalPaid,
+      paymentType: formData.paymentType || 'Full Payment',
+      paymentMethod: formData.paymentMethod || 'Cash',
+      upiTransactionId: formData.paymentMethod === "UPI" ? (formData.upiTransactionId || '').trim() : "",
+      paymentDate: formData.paymentDate || new Date().toISOString().split('T')[0],
+      adminRemarks: (formData.adminRemarks || '').trim(),
+    };
+
+    console.log('[ADMIN] Action started');
+    console.log('[ADMIN] ACTION: adminSubmitFeePayment');
+    console.log('[ADMIN] REQUEST URL:', getScriptUrl());
+    console.log('[ADMIN] REQUEST PAYLOAD:', payload);
+
+    try {
+      console.log('[ADMIN] Sending fee payment request...');
+      const response = await fetch(getScriptUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+      });
+
+      console.log('[ADMIN] HTTP status:', response.status);
+      const rawText = await response.text();
+      console.log('[ADMIN] Raw response:', rawText);
+
+      let json: any;
+      try {
+        json = JSON.parse(rawText);
+      } catch {
+        json = null;
+      }
+      console.log('[ADMIN] Parsed response:', json);
+
+      const isSuccess =
+        json &&
+        (json.success === true ||
+         json.status === 'success' ||
+         json.status === 'Successful' ||
+         json.result === 'success');
+
+      if (isSuccess) {
+        console.log('[ADMIN] Backend success: true');
+        console.log('[ADMIN] Google Sheet save confirmed');
+        fallbackAdminSubmitFeePayment({
+          ...formData,
+          receiptNumber: json.receiptNumber || json.receiptNo,
+          feeReferenceNumber: json.feeReferenceNumber,
+        });
+        return json;
+      }
+
+      const errMsg = json?.message || json?.error || 'Payment failed to save to Google Sheets.';
+      console.error('[ADMIN] SAVE FAILED');
+      console.error('[ADMIN] Error:', errMsg);
+      throw new Error(errMsg);
+    } catch (err: any) {
+      console.error('[ADMIN] SAVE FAILED');
+      console.error('[ADMIN] Error:', err.message || err);
+      throw err;
+    }
   },
 
   // Seed Sample Data

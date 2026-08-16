@@ -10,7 +10,7 @@ import {
   AlertCircle,
   Sparkles,
 } from 'lucide-react';
-import abGymLogo from '../assets/ab-gym-logo.png';
+import abGymLogo from '../assets/logo';
 
 export interface RegistrationSuccessData {
   registrationReferenceNumber: string;

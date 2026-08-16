@@ -548,8 +548,16 @@ export function getMemberForFee(data: GetMemberForFeeData): GetMemberForFeeRespo
           emailAddress: m.email || "",
           selectedPlan: m.planName || "",
           joiningDate: m.joiningDate || "",
+          membershipExpiry: m.membershipExpiry || "",
           registrationStatus: 'Approved',
-          registrationFee: 100
+          registrationFee: m.registrationFeePaid || 100,
+          previousBalance: Number(m.previousBalance ?? 0),
+          feePriceType: (m as any).feePriceType || 'Regular Price',
+          finalFeeAmount: (m as any).finalFeeAmount || 0,
+          offerNote: (m as any).offerNote || '',
+          offerValidFrom: (m as any).offerValidFrom || '',
+          offerValidUntil: (m as any).offerValidUntil || '',
+          status: m.status || 'Active'
         };
         isFromMembers = true;
         break;
@@ -661,15 +669,20 @@ export function getMemberForFee(data: GetMemberForFeeData): GetMemberForFeeRespo
       selectedPlan: matchedRecord.selectedPlan || "",
       joiningDate: matchedRecord.joiningDate || "",
       membershipStartDate: matchedRecord.joiningDate || "",
-      membershipExpiryDate: calculateExpiryDate(matchedRecord.joiningDate || new Date().toISOString(), 1),
+      membershipExpiryDate: matchedRecord.membershipExpiry || calculateExpiryDate(matchedRecord.joiningDate || new Date().toISOString(), 1),
       registrationStatus: 'Approved',
       memberStatus: 'Approved',
       paymentStatus: existingPayment ? existingPayment.status : 'Pending',
       registrationFee: matchedRecord.registrationFee || 100,
-      previousBalance: 0,
+      previousBalance: Number(matchedRecord.previousBalance ?? 0),
       lastPaymentDate: existingPayment ? existingPayment.paymentDate : 'None',
       lastPaymentAmount: existingPayment ? existingPayment.amountPaid : 0,
-      lastPaymentStatus: existingPayment ? existingPayment.status : 'None'
+      lastPaymentStatus: existingPayment ? existingPayment.status : 'None',
+      feePriceType: matchedRecord.feePriceType || 'Regular Price',
+      finalFeeAmount: matchedRecord.finalFeeAmount || 0,
+      offerNote: matchedRecord.offerNote || '',
+      offerValidFrom: matchedRecord.offerValidFrom || '',
+      offerValidUntil: matchedRecord.offerValidUntil || ''
     };
 
     return {
@@ -1316,6 +1329,43 @@ export function fallbackAdminSubmitFeePayment(formData: any) {
 
   payments.unshift(newFeeRecord);
   savePayments(payments);
+
+  // Update Member record in LocalStorage to reflect new balance, last payment, and active status
+  try {
+    const members = getStoredMembers();
+    const queryNorm = normalizeId(refOrRoll);
+    let memberUpdated = false;
+
+    for (let i = 0; i < members.length; i++) {
+      const m = members[i];
+      const mRollNorm = normalizeId(m.rollNumber);
+      const mRegNorm = normalizeId(m.registrationRef);
+      const mPhoneNorm = normalizeId(m.phone);
+
+      if ((queryNorm && (mRollNorm === queryNorm || mRegNorm === queryNorm)) || (phone && mPhoneNorm === normalizeId(phone))) {
+        members[i] = {
+          ...m,
+          previousBalance: remBal,
+          lastPaymentAmount: amtPaid,
+          lastPaymentDate: formData.paymentDate || now.toISOString().split('T')[0],
+          lastPaymentStatus: 'Successful',
+          status: 'Active',
+          ...(formData.feePriceType ? { feePriceType: formData.feePriceType } : {}),
+          ...(formData.finalFeeAmount ? { finalFeeAmount: Number(formData.finalFeeAmount) } : {}),
+          ...(formData.offerNote ? { offerNote: formData.offerNote } : {}),
+          updatedAt: now.toISOString()
+        };
+        memberUpdated = true;
+        break;
+      }
+    }
+
+    if (memberUpdated) {
+      saveMembers(members);
+    }
+  } catch (memErr) {
+    console.error('[fallbackAdminSubmitFeePayment] Error updating member balance in storage:', memErr);
+  }
 
   logAdminActivity(
     'Admin',
