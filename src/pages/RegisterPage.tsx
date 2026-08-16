@@ -331,6 +331,17 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ initialPlanId, onNav
         origin: { y: 0.6 },
       });
 
+      // Dispatch confirmation email trigger
+      if (payload.email) {
+        apiService.sendConfirmationEmail({
+          type: 'registration',
+          email: payload.email,
+          fullName: payload.fullName,
+          registrationRef: regRef,
+          selectedPlan: payload.selectedPlan,
+        }).catch(() => {});
+      }
+
       // Navigate user to /registration-success page with details
       onNavigate('/registration-success', {
         registrationRef: regRef,

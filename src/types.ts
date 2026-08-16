@@ -7,22 +7,33 @@ export interface Member {
   timestamp?: string;
   registrationRef?: string;
   rollNumber: string; // e.g. ABG-26-0688
+  rollNo?: string;
   fullName: string;
+  name?: string;
   gender: 'Male' | 'Female' | 'Other' | string;
   dob: string;
+  dateOfBirth?: string;
   phone: string;
+  phoneNumber?: string;
   email: string;
+  emailAddress?: string;
   address: string;
   emergencyContact: string;
+  emergencyContactNumber?: string;
   planId?: string;
   planName?: string;
   selectedPlan?: string;
+  membershipPlan?: string;
   fitnessGoal: string;
   joiningDate: string;
+  joinDate?: string;
   membershipExpiry?: string;
+  expiryDate?: string;
   planStartDate?: string;
   planExpiryDate?: string;
   status: MemberStatus | string;
+  membershipStatus?: MemberStatus | string;
+  memberStatus?: MemberStatus | string;
   previousBalance?: number;
   lastPaymentDate?: string;
   lastPaymentAmount?: number;
@@ -236,6 +247,18 @@ export interface ActivityLogRecord {
   oldStatus?: string; // Old Status
   newStatus?: string; // New Status
   remarks?: string; // Remarks
+}
+
+export interface AttendanceRecord {
+  id: string;
+  timestamp: string;
+  rollNumber: string;
+  memberName: string;
+  planName: string;
+  status: string;
+  date: string;
+  time: string;
+  scanSource?: string;
 }
 
 export interface DashboardStats {

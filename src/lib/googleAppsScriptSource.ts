@@ -201,6 +201,7 @@ function handleAction(action, data, token) {
   if (action === 'adminSubmitFeePayment') return handleAdminSubmitFeePayment(data);
   if (action === 'updateMember') return handleUpdateMember(data);
   if (action === 'deleteMember') return handleDeleteMember(data);
+  if (action === 'directAddMember' || action === 'addMember' || action === 'restoreMember' || action === 'adminAddMember') return handleDirectAddMember(data);
   if (action === 'seedSampleData') return handleSeedSampleData();
 
   return createJsonResponse({
@@ -1406,10 +1407,10 @@ function handleUpdateRegistrationStatus(data) {
     var remarks = cleanString(data.adminRemarks || data.remarks);
     var rejectionReason = cleanString(data.rejectionReason);
 
-    if (!regRef || !newStatus) {
+    if (!regRef) {
       return createJsonResponse({
         success: false,
-        message: 'Registration Reference and New Status are required.'
+        message: 'Registration Reference is required.'
       });
     }
 
@@ -1446,6 +1447,40 @@ function handleUpdateRegistrationStatus(data) {
 
     var now = new Date();
     var nowStr = formatDate(now);
+
+    // Apply inline field edits if passed
+    if (data.fullName || data.name) {
+      var fnIdx = headers.indexOf('Full Name');
+      if (fnIdx !== -1) regSheet.getRange(targetRowIdx, fnIdx + 1).setValue(data.fullName || data.name);
+    }
+    if (data.phone || data.phoneNumber) {
+      var pIdx = headers.indexOf('Phone Number');
+      if (pIdx !== -1) regSheet.getRange(targetRowIdx, pIdx + 1).setValue(data.phone || data.phoneNumber);
+    }
+    if (data.email || data.emailAddress) {
+      var eIdx = headers.indexOf('Email Address');
+      if (eIdx !== -1) regSheet.getRange(targetRowIdx, eIdx + 1).setValue(data.email || data.emailAddress);
+    }
+    if (data.selectedPlan || data.planName) {
+      var planIdx = headers.indexOf('Selected Plan');
+      if (planIdx !== -1) regSheet.getRange(targetRowIdx, planIdx + 1).setValue(data.selectedPlan || data.planName);
+    }
+    if (data.registrationFee !== undefined) {
+      var feeIdx = headers.indexOf('Registration Fee');
+      if (feeIdx !== -1) regSheet.getRange(targetRowIdx, feeIdx + 1).setValue(data.registrationFee);
+    }
+    if (data.paymentStatus) {
+      var psIdx = headers.indexOf('Payment Status');
+      if (psIdx !== -1) regSheet.getRange(targetRowIdx, psIdx + 1).setValue(data.paymentStatus);
+    }
+
+    if (newStatus === 'Pending Verification') {
+      if (statusIdx !== -1) regSheet.getRange(targetRowIdx, statusIdx + 1).setValue('Pending Verification');
+      if (rejReasonIdx !== -1) regSheet.getRange(targetRowIdx, rejReasonIdx + 1).setValue('');
+      if (remarksIdx !== -1 && remarks) regSheet.getRange(targetRowIdx, remarksIdx + 1).setValue(remarks);
+      logActivity(adminName, 'Restored Registration', 'Registration', regRef, targetRowObj['Registration Status'] || 'Rejected', 'Pending Verification', 'Registration restored to Pending');
+      return createJsonResponse({ success: true, message: 'Registration restored to Pending Verification successfully.' });
+    }
 
     if (newStatus === 'Approved') {
       // Generate Roll Number using phone last 4 digits (ABG-YY-XXXX or duplicate ABG-YY-XXXX-02)
@@ -1871,35 +1906,152 @@ function handleAdminSubmitFeePayment(data) {
   }
 }
 
+function findSheetColumnIdx(headers, candidateNames) {
+  if (!headers || !candidateNames) return -1;
+  for (var j = 0; j < candidateNames.length; j++) {
+    var target = String(candidateNames[j] || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    for (var i = 0; i < headers.length; i++) {
+      var h = String(headers[i] || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (h === target) return i;
+    }
+  }
+  return -1;
+}
+
 function handleUpdateMember(data) {
+  var lock = LockService.getScriptLock();
   try {
-    var rollNo = cleanString(data.rollNumber);
-    if (!rollNo) {
-      return createJsonResponse({ success: false, message: 'Roll Number is required.' });
+    lock.waitLock(10000);
+    var rollNo = cleanString(data.rollNumber || data.rollNo || data.originalRollNumber || data.id);
+    var origRoll = cleanString(data.originalRollNumber || data.rollNumber || data.rollNo);
+    var regRef = cleanString(data.registrationRef || data.registrationReferenceNumber || data.id);
+    var phone = cleanString(data.phone || data.phoneNumber);
+    var email = cleanString(data.email || data.emailAddress).toLowerCase();
+
+    if (!rollNo && !origRoll && !regRef && !phone && !email) {
+      return createJsonResponse({ success: false, message: 'Roll Number or Member ID is required.' });
     }
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName(SHEETS.MEMBERS);
+    if (!sheet) {
+      return createJsonResponse({ success: false, message: 'Members sheet not found.' });
+    }
+
     var memData = sheet.getDataRange().getValues();
+    if (!memData || memData.length < 2) {
+      return createJsonResponse({ success: false, message: 'No member records in sheet.' });
+    }
+
     var headers = memData[0];
-    var rollIdx = headers.indexOf('Roll Number');
+    var rollIdx = findSheetColumnIdx(headers, ['Roll Number', 'Roll No', 'Roll', 'Member ID', 'Membership ID', 'RollNo']);
+    var phoneIdx = findSheetColumnIdx(headers, ['Phone Number', 'Phone', 'Mobile Number', 'Mobile', 'PhoneNumber']);
+    var emailIdx = findSheetColumnIdx(headers, ['Email Address', 'Email', 'EmailAddress']);
+    var regRefIdx = findSheetColumnIdx(headers, ['Registration Reference Number', 'Registration Ref', 'Reg Ref', 'Ref Number', 'RegistrationReferenceNumber']);
+
+    var targetRowIdx = -1;
+    var rollUpper = rollNo.toUpperCase();
+    var origUpper = origRoll.toUpperCase();
+    var regRefUpper = regRef.toUpperCase();
+    var rollAlpha = rollUpper.replace(/[^A-Z0-9]/g, '');
+    var cleanDigitsPhone = phone.replace(/\D/g, '');
 
     for (var i = 1; i < memData.length; i++) {
-      if (cleanString(memData[i][rollIdx]).toUpperCase() === rollNo.toUpperCase()) {
-        if (data.fullName) sheet.getRange(i + 1, headers.indexOf('Full Name') + 1).setValue(data.fullName);
-        if (data.phone) sheet.getRange(i + 1, headers.indexOf('Phone Number') + 1).setValue(data.phone);
-        if (data.memberStatus) sheet.getRange(i + 1, headers.indexOf('Member Status') + 1).setValue(data.memberStatus);
-        if (data.remarks) sheet.getRange(i + 1, headers.indexOf('Remarks') + 1).setValue(data.remarks);
-        sheet.getRange(i + 1, headers.indexOf('Updated At') + 1).setValue(formatDate(new Date()));
+      var cellRoll = rollIdx !== -1 ? cleanString(memData[i][rollIdx]).toUpperCase() : '';
+      var cellRollAlpha = cellRoll.replace(/[^A-Z0-9]/g, '');
+      var cellPhone = phoneIdx !== -1 ? cleanString(memData[i][phoneIdx]) : '';
+      var cellPhoneDigits = cellPhone.replace(/\D/g, '');
+      var cellEmail = emailIdx !== -1 ? cleanString(memData[i][emailIdx]).toLowerCase() : '';
+      var cellRegRef = regRefIdx !== -1 ? cleanString(memData[i][regRefIdx]).toUpperCase() : '';
 
-        logActivity(data.adminName || 'Admin', 'Updated Member Details', 'Member', rollNo, 'Active', data.memberStatus || 'Active', 'Member profile updated');
-        return createJsonResponse({ success: true, message: 'Member details updated successfully.' });
+      if (
+        (rollUpper && cellRoll === rollUpper) ||
+        (origUpper && cellRoll === origUpper) ||
+        (rollAlpha && cellRollAlpha === rollAlpha && rollAlpha.length > 0) ||
+        (regRefUpper && cellRegRef === regRefUpper) ||
+        (cleanDigitsPhone.length >= 7 && cellPhoneDigits && (cellPhoneDigits.slice(-10) === cleanDigitsPhone.slice(-10))) ||
+        (email && cellEmail && cellEmail === email)
+      ) {
+        targetRowIdx = i + 1; // 1-indexed row number in Sheet
+        break;
       }
     }
 
-    return createJsonResponse({ success: false, message: 'Member not found.' });
+    if (targetRowIdx !== -1) {
+      if (rollIdx !== -1 && (data.rollNumber || data.rollNo)) {
+        sheet.getRange(targetRowIdx, rollIdx + 1).setValue(data.rollNumber || data.rollNo);
+      }
+      var fnIdx = findSheetColumnIdx(headers, ['Full Name', 'Name', 'Member Name', 'FullName']);
+      if (fnIdx !== -1 && (data.fullName || data.name)) {
+        sheet.getRange(targetRowIdx, fnIdx + 1).setValue(data.fullName || data.name);
+      }
+      if (phoneIdx !== -1 && (data.phone || data.phoneNumber)) {
+        sheet.getRange(targetRowIdx, phoneIdx + 1).setValue(data.phone || data.phoneNumber);
+      }
+      if (emailIdx !== -1 && (data.email || data.emailAddress)) {
+        sheet.getRange(targetRowIdx, emailIdx + 1).setValue(data.email || data.emailAddress);
+      }
+      var gIdx = findSheetColumnIdx(headers, ['Gender', 'Sex']);
+      if (gIdx !== -1 && data.gender) {
+        sheet.getRange(targetRowIdx, gIdx + 1).setValue(data.gender);
+      }
+      var dobIdx = findSheetColumnIdx(headers, ['Date of Birth', 'DOB', 'DateOfBirth', 'Birth Date']);
+      if (dobIdx !== -1 && (data.dob || data.dateOfBirth)) {
+        sheet.getRange(targetRowIdx, dobIdx + 1).setValue(data.dob || data.dateOfBirth);
+      }
+      var addrIdx = findSheetColumnIdx(headers, ['Address', 'Full Address', 'Residential Address']);
+      if (addrIdx !== -1 && data.address !== undefined) {
+        sheet.getRange(targetRowIdx, addrIdx + 1).setValue(data.address);
+      }
+      var emIdx = findSheetColumnIdx(headers, ['Emergency Contact Number', 'Emergency Contact', 'Emergency Phone', 'EmergencyContact']);
+      if (emIdx !== -1 && (data.emergencyContact !== undefined || data.emergencyContactNumber !== undefined)) {
+        sheet.getRange(targetRowIdx, emIdx + 1).setValue(data.emergencyContact || data.emergencyContactNumber || '');
+      }
+      var planIdx = findSheetColumnIdx(headers, ['Selected Plan', 'Plan', 'Membership Plan', 'Plan Name', 'SelectedPlan']);
+      if (planIdx !== -1 && (data.planName || data.selectedPlan || data.membershipPlan)) {
+        sheet.getRange(targetRowIdx, planIdx + 1).setValue(data.planName || data.selectedPlan || data.membershipPlan);
+      }
+      var fgIdx = findSheetColumnIdx(headers, ['Fitness Goal', 'Goal', 'FitnessGoal']);
+      if (fgIdx !== -1 && data.fitnessGoal !== undefined) {
+        sheet.getRange(targetRowIdx, fgIdx + 1).setValue(data.fitnessGoal);
+      }
+      var mcIdx = findSheetColumnIdx(headers, ['Medical Condition', 'Medical', 'Health Condition', 'MedicalCondition']);
+      if (mcIdx !== -1 && data.medicalCondition !== undefined) {
+        sheet.getRange(targetRowIdx, mcIdx + 1).setValue(data.medicalCondition);
+      }
+      if (regRefIdx !== -1 && (data.registrationRef || data.registrationReferenceNumber)) {
+        sheet.getRange(targetRowIdx, regRefIdx + 1).setValue(data.registrationRef || data.registrationReferenceNumber);
+      }
+      var jIdx = findSheetColumnIdx(headers, ['Joining Date', 'Join Date', 'Membership Start Date', 'Start Date', 'JoiningDate']);
+      if (jIdx !== -1 && (data.joiningDate || data.joinDate)) {
+        sheet.getRange(targetRowIdx, jIdx + 1).setValue(data.joiningDate || data.joinDate);
+      }
+      var expIdx = findSheetColumnIdx(headers, ['Membership Expiry Date', 'Expiry Date', 'Plan Expiry Date', 'Expiry', 'MembershipExpiry']);
+      if (expIdx !== -1 && (data.membershipExpiry || data.expiryDate || data.planExpiryDate)) {
+        sheet.getRange(targetRowIdx, expIdx + 1).setValue(data.membershipExpiry || data.expiryDate || data.planExpiryDate);
+      }
+      var stIdx = findSheetColumnIdx(headers, ['Member Status', 'Status', 'Membership Status', 'MemberStatus']);
+      if (stIdx !== -1 && (data.memberStatus || data.status || data.membershipStatus)) {
+        sheet.getRange(targetRowIdx, stIdx + 1).setValue(data.memberStatus || data.status || data.membershipStatus);
+      }
+      var remIdx = findSheetColumnIdx(headers, ['Remarks', 'Notes', 'Admin Remarks', 'Remark']);
+      if (remIdx !== -1 && data.remarks !== undefined) {
+        sheet.getRange(targetRowIdx, remIdx + 1).setValue(data.remarks);
+      }
+      var upIdx = findSheetColumnIdx(headers, ['Updated At', 'Last Updated', 'UpdatedAt']);
+      if (upIdx !== -1) {
+        sheet.getRange(targetRowIdx, upIdx + 1).setValue(formatDate(new Date()));
+      }
+
+      logActivity(data.adminName || 'Admin', 'Updated Member Details', 'Member', rollNo || origRoll, 'Active', data.memberStatus || data.status || 'Active', 'Member profile updated');
+      return createJsonResponse({ success: true, message: 'Member details updated successfully.' });
+    }
+
+    return createJsonResponse({ success: false, message: 'Member record not found in Google Sheet.' });
   } catch (err) {
     return createJsonResponse({ success: false, message: 'Failed to update member: ' + err.toString() });
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -1922,6 +2074,143 @@ function handleDeleteMember(data) {
     return createJsonResponse({ success: false, message: 'Member not found.' });
   } catch (err) {
     return createJsonResponse({ success: false, message: 'Failed to delete member: ' + err.toString() });
+  }
+}
+
+function handleDirectAddMember(data) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var memSheet = ss.getSheetByName(SHEETS.MEMBERS);
+    var regSheet = ss.getSheetByName(SHEETS.REGISTRATIONS);
+    var feeSheet = ss.getSheetByName(SHEETS.FEE_PAYMENTS);
+
+    var now = new Date();
+    var nowStr = formatDate(now);
+    var todayStr = formatDateShort(now);
+    var phone = cleanString(data.phone || data.phoneNumber);
+    var fullName = cleanString(data.fullName || data.name);
+    var email = cleanString(data.email || data.emailAddress);
+    var rollNo = cleanString(data.rollNumber || data.rollNo);
+    var plan = cleanString(data.planName || data.selectedPlan || data.membershipPlan) || 'Basic Plan';
+    var status = cleanString(data.status || data.membershipStatus || data.memberStatus) || 'Active';
+    var adminName = cleanString(data.adminName) || 'Admin';
+    var regRef = cleanString(data.registrationRef || data.registrationReferenceNumber) || generateRegistrationRef(now);
+
+    if (!fullName || !phone) {
+      return createJsonResponse({ success: false, message: 'Full Name and Phone Number are required.' });
+    }
+
+    if (!rollNo) {
+      rollNo = generateRollNumber(phone, ss);
+    }
+
+    var joinDate = cleanString(data.joiningDate || data.joinDate) || todayStr;
+    var expDate = cleanString(data.membershipExpiry || data.expiryDate || data.planExpiryDate) || calculateExpiry(joinDate, 1);
+    var fee = parseFloat(data.registrationFee || data.initialAmountPaid || 100) || 0;
+    var payStatus = cleanString(data.paymentStatus) || 'Successful';
+    var payMode = cleanString(data.paymentMode || data.paymentMethod) || 'Cash';
+
+    // 1. Append to Members Sheet
+    var memRow = [
+      nowStr, // Timestamp
+      regRef, // Registration Reference Number
+      rollNo,
+      fullName,
+      data.gender || 'Male',
+      data.dob || data.dateOfBirth || '',
+      phone,
+      email,
+      data.address || '',
+      data.emergencyContact || data.emergencyContactNumber || '',
+      plan,
+      data.fitnessGoal || '',
+      joinDate,
+      joinDate, // Membership Start Date
+      expDate, // Membership Expiry Date
+      fee, // Registration Fee
+      0, // Previous Balance
+      status,
+      payStatus === 'Successful' ? todayStr : 'None',
+      payStatus === 'Successful' ? fee : 0,
+      payStatus,
+      data.medicalCondition || '',
+      data.remarks || 'Direct member registration / restored by admin',
+      'Admin (' + adminName + ')',
+      nowStr
+    ];
+    memSheet.appendRow(memRow);
+
+    // 2. Append to Registrations Sheet (Approved)
+    var regRow = [
+      nowStr,
+      regRef,
+      fullName,
+      data.gender || 'Male',
+      data.dob || data.dateOfBirth || '',
+      phone,
+      email,
+      data.address || '',
+      data.emergencyContact || data.emergencyContactNumber || '',
+      plan,
+      data.fitnessGoal || '',
+      fee,
+      payMode,
+      payStatus,
+      'DIR-' + rollNo,
+      'Approved',
+      adminName,
+      todayStr,
+      rollNo,
+      data.remarks || 'Direct registration / restored by Admin',
+      ''
+    ];
+    regSheet.appendRow(regRow);
+
+    // 3. Append to Fee Payments Sheet if fee > 0
+    if (fee > 0 && payStatus === 'Successful') {
+      var feeRef = generateFeeRef(now);
+      var feeRow = [
+        nowStr,
+        feeRef,
+        regRef,
+        rollNo,
+        fullName,
+        phone,
+        email,
+        plan,
+        '1 Month',
+        fee,
+        0,
+        fee,
+        fee,
+        0,
+        payMode,
+        'DIR-' + Date.now().toString().slice(-6),
+        'Successful',
+        todayStr,
+        adminName,
+        data.remarks || 'Direct registration initial fee payment'
+      ];
+      feeSheet.appendRow(feeRow);
+    }
+
+    logActivity(adminName, 'Direct Member Registered / Restored', 'Member', rollNo, 'None', status, 'Directly registered/restored ' + fullName + ' (' + rollNo + ')');
+
+    return createJsonResponse({
+      success: true,
+      message: 'Member ' + fullName + ' (' + rollNo + ') added/restored successfully.',
+      data: {
+        rollNumber: rollNo,
+        registrationRef: regRef,
+        fullName: fullName
+      }
+    });
+  } catch (err) {
+    return createJsonResponse({ success: false, message: 'Failed to add/restore member: ' + err.toString() });
+  } finally {
+    lock.releaseLock();
   }
 }
 

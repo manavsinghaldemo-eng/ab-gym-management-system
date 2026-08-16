@@ -86,10 +86,22 @@ export const MemberCardModal: React.FC<MemberCardModalProps> = ({ member, onClos
               </p>
             </div>
 
-            {/* QR Mockup */}
-            <div className="flex flex-col items-center justify-center bg-zinc-900/90 p-2 rounded-xl border border-zinc-800 shadow-inner">
-              <QrCode className="w-12 h-12 text-zinc-200" />
-              <span className="text-[8px] text-zinc-500 font-mono mt-1">VERIFIED PASS</span>
+            {/* QR Code Generator */}
+            <div className="flex flex-col items-center justify-center bg-white p-1.5 rounded-xl border border-zinc-300 shadow-sm shrink-0">
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
+                  JSON.stringify({
+                    rollNumber: member.rollNumber,
+                    fullName: member.fullName,
+                    planName: member.planName,
+                    status: member.status,
+                    expiry: member.membershipExpiry,
+                  })
+                )}`}
+                alt={`Attendance QR Code for ${member.fullName}`}
+                className="w-14 h-14 object-contain rounded"
+              />
+              <span className="text-[8px] text-zinc-900 font-mono font-bold tracking-tight mt-0.5">SCAN ATTENDANCE</span>
             </div>
           </div>
 

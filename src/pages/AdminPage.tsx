@@ -11,11 +11,12 @@ import {
   ActivityLogRecord,
   DashboardStats,
   GymSettings,
+  AttendanceRecord,
 } from '../types';
 import { downloadMemberCardPDF, downloadFeeReceiptPDF } from '../lib/pdf';
 import { MemberCardModal } from '../components/MemberCardModal';
 import { ReceiptModal } from '../components/ReceiptModal';
-import { getStoredSettings, saveSettings } from '../lib/storage';
+import { getStoredSettings, saveSettings, getStoredAttendance, markMemberAttendance, getStoredMembers, getStoredPlans, updateMemberInStorage, directAddMemberToStorage } from '../lib/storage';
 import { AB_FITNESS_UPI_ID } from '../data/initialData';
 import abGymLogo from '../assets/ab-gym-logo.png';
 
@@ -54,6 +55,7 @@ import {
   Loader2,
   Database,
   Plus,
+  UserPlus,
   Edit3,
   QrCode,
   History,
@@ -130,17 +132,65 @@ const normalizeRegistration = (record: any, idx: number): RegistrationRequest =>
   };
 };
 
+export const normalizeDateForInput = (val: any): string => {
+  if (!val) return '';
+  const s = String(val).trim();
+  if (!s || s.toLowerCase() === 'undefined' || s.toLowerCase() === 'null') return '';
+
+  // Check if it's already YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return s;
+  }
+
+  // Check ISO format like 2026-08-15T... or 2026-08-15 10:30:00
+  if (/^\d{4}-\d{2}-\d{2}[T\s]/.test(s)) {
+    return s.substring(0, 10);
+  }
+
+  // Check DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
+  const dmyMatch = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})/);
+  if (dmyMatch) {
+    const day = dmyMatch[1].padStart(2, '0');
+    const month = dmyMatch[2].padStart(2, '0');
+    const year = dmyMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // Check YYYY/MM/DD
+  const ymdMatch = s.match(/^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})/);
+  if (ymdMatch) {
+    const year = ymdMatch[1];
+    const month = ymdMatch[2].padStart(2, '0');
+    const day = ymdMatch[3].padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  // Try parsing with standard Date
+  const parsed = new Date(s);
+  if (!isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  return '';
+};
+
 const normalizeMember = (record: any, idx: number): Member => {
   if (!record) return {} as Member;
-  const roll = String(record['Roll Number'] ?? record['rollNumber'] ?? record['rollNo'] ?? record['id'] ?? `ABG-2026-${String(idx + 1).padStart(3, '0')}`);
-  const name = String(record['Full Name'] ?? record['fullName'] ?? record['name'] ?? record['memberName'] ?? 'Gym Member');
-  const phone = String(record['Phone Number'] ?? record['phoneNumber'] ?? record['phone'] ?? record['memberPhone'] ?? '');
-  const email = String(record['Email Address'] ?? record['emailAddress'] ?? record['email'] ?? record['memberEmail'] ?? '');
-  const dob = String(record['Date of Birth'] ?? record['dateOfBirth'] ?? record['dob'] ?? '');
-  const plan = String(record['Membership Plan'] ?? record['membershipPlan'] ?? record['selectedPlan'] ?? record['planName'] ?? 'Monthly Gold Plan');
-  const status = String(record['Membership Status'] ?? record['membershipStatus'] ?? record['status'] ?? 'Active');
-  const emergency = String(record['Emergency Contact Number'] ?? record['emergencyContactNumber'] ?? record['emergencyContact'] ?? '');
-  const regRef = String(record['Registration Reference Number'] ?? record['registrationReferenceNumber'] ?? record['registrationRef'] ?? '');
+  const roll = String(record['rollNumber'] ?? record['rollNo'] ?? record['Roll Number'] ?? record['id'] ?? `ABG-2026-${String(idx + 1).padStart(3, '0')}`);
+  const name = String(record['fullName'] ?? record['name'] ?? record['memberName'] ?? record['Full Name'] ?? 'Gym Member');
+  const phone = String(record['phone'] ?? record['phoneNumber'] ?? record['memberPhone'] ?? record['Phone Number'] ?? '');
+  const email = String(record['email'] ?? record['emailAddress'] ?? record['memberEmail'] ?? record['Email Address'] ?? '');
+  const dob = String(record['dob'] ?? record['dateOfBirth'] ?? record['Date of Birth'] ?? '');
+  const plan = String(record['planName'] ?? record['selectedPlan'] ?? record['membershipPlan'] ?? record['Plan Name'] ?? record['Membership Plan'] ?? 'Basic Plan');
+  const status = String(record['status'] ?? record['membershipStatus'] ?? record['memberStatus'] ?? record['Membership Status'] ?? 'Active');
+  const emergency = String(record['emergencyContact'] ?? record['emergencyContactNumber'] ?? record['Emergency Contact Number'] ?? '');
+  const regRef = String(record['registrationRef'] ?? record['registrationReferenceNumber'] ?? record['Registration Reference Number'] ?? '');
+
+  const joining = String(record['joiningDate'] ?? record['joinDate'] ?? record['Joining Date'] ?? record['Join Date'] ?? new Date().toISOString().split('T')[0]);
+  const expiry = String(record['membershipExpiry'] ?? record['expiryDate'] ?? record['planExpiryDate'] ?? record['Membership Expiry'] ?? record['Expiry Date'] ?? '');
 
   return {
     ...record,
@@ -153,22 +203,29 @@ const normalizeMember = (record: any, idx: number): Member => {
     phoneNumber: phone,
     email: email,
     emailAddress: email,
-    gender: String(record['Gender'] ?? record['gender'] ?? 'Male'),
+    gender: String(record['gender'] ?? record['Gender'] ?? 'Male'),
     dob: dob,
     dateOfBirth: dob,
+    planName: plan,
     membershipPlan: plan,
     selectedPlan: plan,
     status: status,
     membershipStatus: status,
-    joinDate: String(record['Join Date'] ?? record['joinDate'] ?? record['joiningDate'] ?? new Date().toISOString().split('T')[0]),
-    expiryDate: String(record['Expiry Date'] ?? record['expiryDate'] ?? ''),
+    joiningDate: joining,
+    joinDate: joining,
+    membershipExpiry: expiry,
+    expiryDate: expiry,
+    planExpiryDate: expiry,
     emergencyContact: emergency,
     emergencyContactNumber: emergency,
-    address: String(record['Address'] ?? record['address'] ?? ''),
-    bloodGroup: String(record['Blood Group'] ?? record['bloodGroup'] ?? ''),
-    photoUrl: String(record['Photo URL'] ?? record['photoUrl'] ?? ''),
+    address: String(record['address'] ?? record['Address'] ?? ''),
+    fitnessGoal: String(record['fitnessGoal'] ?? record['Fitness Goal'] ?? ''),
+    medicalCondition: String(record['medicalCondition'] ?? record['Medical Condition'] ?? ''),
+    bloodGroup: String(record['bloodGroup'] ?? record['Blood Group'] ?? ''),
+    photoUrl: String(record['photoUrl'] ?? record['Photo URL'] ?? ''),
     registrationReferenceNumber: regRef,
     registrationRef: regRef,
+    remarks: String(record['remarks'] ?? record['Remarks'] ?? ''),
   };
 };
 
@@ -498,6 +555,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     if (path.includes('/admin/members')) return 'members';
     if (path.includes('/admin/fee-records')) return 'fee-records';
     if (path.includes('/admin/payment-history')) return 'payment-history';
+    if (path.includes('/admin/attendance')) return 'attendance';
     return 'dashboard';
   };
 
@@ -518,6 +576,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
   const [members, setMembers] = useState<Member[]>([]);
   const [feePayments, setFeePayments] = useState<FeePaymentRecord[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLogRecord[]>([]);
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(getStoredAttendance());
+  const [scanQuery, setScanQuery] = useState('');
+  const [scanMessage, setScanMessage] = useState<{ success: boolean; text: string; member?: Member } | null>(null);
+
+  const handleScanAttendance = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!scanQuery.trim()) return;
+    const res = markMemberAttendance(scanQuery, 'Reception Scanner');
+    setScanMessage({
+      success: res.success,
+      text: res.message,
+      member: res.member,
+    });
+    setAttendanceRecords(getStoredAttendance());
+    setScanQuery('');
+  };
   const [settings, setSettingsState] = useState<GymSettings>(getStoredSettings());
 
   // Loading & Sync States
@@ -578,7 +652,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
   // Edit Member Modal State
   const [editingMember, setEditingMember] = useState<Member | null>(null);
-  const [editMemberForm, setEditMemberForm] = useState<{
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editFormData, setEditFormData] = useState<{
     rollNumber: string;
     fullName: string;
     phone: string;
@@ -586,11 +661,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     planName: string;
     joiningDate: string;
     membershipExpiry: string;
-    status: 'Active' | 'Expired';
+    status: string;
     dob: string;
     gender: string;
     address: string;
     emergencyContact: string;
+    fitnessGoal: string;
+    medicalCondition: string;
     remarks: string;
   }>({
     rollNumber: '',
@@ -605,84 +682,535 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     gender: 'Male',
     address: '',
     emergencyContact: '',
+    fitnessGoal: '',
+    medicalCondition: '',
     remarks: '',
   });
   const [isUpdatingMember, setIsUpdatingMember] = useState(false);
   const [editMemberError, setEditMemberError] = useState('');
+  const [memberSuccessToast, setMemberSuccessToast] = useState<{
+    message: string;
+    memberName?: string;
+    rollNumber?: string;
+  } | null>(null);
 
   useEffect(() => {
-    if (editingMember) {
-      setEditMemberForm({
-        rollNumber: editingMember.rollNumber || '',
-        fullName: editingMember.fullName || '',
-        phone: editingMember.phone || '',
-        email: editingMember.email || '',
-        planName: editingMember.planName || 'Basic Plan',
-        joiningDate: editingMember.joiningDate || '',
-        membershipExpiry: editingMember.membershipExpiry || '',
-        status: editingMember.status === 'Active' ? 'Active' : 'Expired',
-        dob: editingMember.dob || '',
-        gender: editingMember.gender || 'Male',
-        address: editingMember.address || '',
-        emergencyContact: editingMember.emergencyContact || '',
-        remarks: editingMember.remarks || '',
-      });
-      setEditMemberError('');
+    if (memberSuccessToast) {
+      const timer = setTimeout(() => {
+        setMemberSuccessToast(null);
+      }, 5000);
+      return () => clearTimeout(timer);
     }
-  }, [editingMember]);
+  }, [memberSuccessToast]);
 
-  const handleSaveEditMember = async (e: React.FormEvent) => {
+  // Edit & Restore Registration Modal State
+  const [editingRegistration, setEditingRegistration] = useState<RegistrationRequest | null>(null);
+  const [editRegForm, setEditRegForm] = useState<{
+    fullName: string;
+    phone: string;
+    email: string;
+    gender: string;
+    dob: string;
+    selectedPlan: string;
+    registrationFee: number;
+    status: 'Pending Verification' | 'Approved' | 'Rejected';
+    paymentStatus: string;
+    address: string;
+    emergencyContact: string;
+    adminRemarks: string;
+    rejectionReason: string;
+  }>({
+    fullName: '',
+    phone: '',
+    email: '',
+    gender: 'Male',
+    dob: '',
+    selectedPlan: 'Basic Plan',
+    registrationFee: 100,
+    status: 'Pending Verification',
+    paymentStatus: 'Submitted',
+    address: '',
+    emergencyContact: '',
+    adminRemarks: '',
+    rejectionReason: '',
+  });
+  const [isUpdatingRegistration, setIsUpdatingRegistration] = useState(false);
+  const [editRegError, setEditRegError] = useState('');
+
+  useEffect(() => {
+    if (editingRegistration) {
+      setEditRegForm({
+        fullName: editingRegistration.fullName || '',
+        phone: editingRegistration.phoneNumber || editingRegistration.phone || '',
+        email: editingRegistration.emailAddress || editingRegistration.email || '',
+        gender: editingRegistration.gender || 'Male',
+        dob: editingRegistration.dateOfBirth || editingRegistration.dob || '',
+        selectedPlan: editingRegistration.selectedPlan || editingRegistration.planName || 'Basic Plan',
+        registrationFee: editingRegistration.registrationFee ?? 100,
+        status: (editingRegistration.registrationStatus || editingRegistration.status || 'Pending Verification') as any,
+        paymentStatus: editingRegistration.paymentStatus || 'Submitted',
+        address: editingRegistration.address || '',
+        emergencyContact: editingRegistration.emergencyContactNumber || editingRegistration.emergencyContact || '',
+        adminRemarks: editingRegistration.adminRemarks || '',
+        rejectionReason: editingRegistration.rejectionReason || '',
+      });
+      setEditRegError('');
+    }
+  }, [editingRegistration]);
+
+  const handleSaveEditRegistration = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editMemberForm.rollNumber.trim()) {
-      setEditMemberError('Roll number is required.');
+    if (!editRegForm.fullName.trim()) {
+      setEditRegError('Full Name is required.');
       return;
     }
-    if (!editMemberForm.fullName.trim()) {
+    if (!editRegForm.phone.trim()) {
+      setEditRegError('Phone Number is required.');
+      return;
+    }
+
+    setIsUpdatingRegistration(true);
+    setEditRegError('');
+
+    try {
+      const regRef = (
+        editingRegistration?.registrationReferenceNumber ||
+        editingRegistration?.registrationRef ||
+        editingRegistration?.id ||
+        ''
+      ).trim().toUpperCase();
+
+      const payload = {
+        action: 'updateRegistrationStatus',
+        registrationReferenceNumber: regRef,
+        registrationRef: regRef,
+        fullName: editRegForm.fullName.trim(),
+        name: editRegForm.fullName.trim(),
+        phone: editRegForm.phone.trim(),
+        phoneNumber: editRegForm.phone.trim(),
+        email: editRegForm.email.trim(),
+        emailAddress: editRegForm.email.trim(),
+        gender: editRegForm.gender,
+        dob: editRegForm.dob,
+        dateOfBirth: editRegForm.dob,
+        selectedPlan: editRegForm.selectedPlan.trim(),
+        planName: editRegForm.selectedPlan.trim(),
+        registrationFee: Number(editRegForm.registrationFee) || 0,
+        status: editRegForm.status,
+        registrationStatus: editRegForm.status,
+        paymentStatus: editRegForm.paymentStatus,
+        address: editRegForm.address,
+        emergencyContact: editRegForm.emergencyContact,
+        emergencyContactNumber: editRegForm.emergencyContact,
+        adminRemarks: editRegForm.adminRemarks,
+        rejectionReason: editRegForm.status === 'Rejected' ? editRegForm.rejectionReason : '',
+        adminName: 'Admin',
+      };
+
+      const res = await apiService.updateRegistrationStatus(payload as any);
+      if (res && res.success === false) {
+        setEditRegError(res.message || 'Failed to update registration.');
+        return;
+      }
+
+      // Optimistically update React state
+      setRegistrations(prevRegs =>
+        prevRegs.map(r => {
+          const rRef = (r.registrationReferenceNumber || r.registrationRef || r.id || '').trim().toUpperCase();
+          if (rRef === regRef) {
+            return {
+              ...r,
+              fullName: editRegForm.fullName.trim(),
+              phone: editRegForm.phone.trim(),
+              phoneNumber: editRegForm.phone.trim(),
+              email: editRegForm.email.trim(),
+              emailAddress: editRegForm.email.trim(),
+              gender: editRegForm.gender,
+              dob: editRegForm.dob,
+              dateOfBirth: editRegForm.dob,
+              selectedPlan: editRegForm.selectedPlan.trim(),
+              planName: editRegForm.selectedPlan.trim(),
+              registrationFee: Number(editRegForm.registrationFee) || 0,
+              status: editRegForm.status as any,
+              registrationStatus: editRegForm.status as any,
+              paymentStatus: editRegForm.paymentStatus,
+              address: editRegForm.address,
+              emergencyContact: editRegForm.emergencyContact,
+              emergencyContactNumber: editRegForm.emergencyContact,
+              adminRemarks: editRegForm.adminRemarks,
+              rejectionReason: editRegForm.status === 'Rejected' ? editRegForm.rejectionReason : '',
+            };
+          }
+          return r;
+        })
+      );
+
+      setEditingRegistration(null);
+
+      // Refresh background data
+      await Promise.all([
+        loadRegistrations(),
+        loadMembers(),
+        loadDashboard(),
+        loadActivityLogs(),
+      ]);
+    } catch (err: any) {
+      setEditRegError(err.message || 'Error updating registration details.');
+    } finally {
+      setIsUpdatingRegistration(false);
+    }
+  };
+
+  const handleEditMember = (member: Member) => {
+    console.log('EDIT CLICKED', member);
+    console.log('selected member ID:', member.rollNumber || member.id || (member as any).rollNo);
+    console.log('selected member object:', member);
+
+    if (!member) return;
+
+    setEditingMember(member);
+    setEditFormData({
+      rollNumber: member.rollNumber || (member as any).rollNo || (member as any)['Roll Number'] || member.id || '',
+      fullName: member.fullName || (member as any).name || (member as any).memberName || (member as any)['Full Name'] || '',
+      phone: member.phone || (member as any).phoneNumber || (member as any).memberPhone || (member as any)['Phone Number'] || '',
+      email: member.email || (member as any).emailAddress || (member as any).memberEmail || (member as any)['Email Address'] || '',
+      planName: member.planName || (member as any).membershipPlan || (member as any).selectedPlan || (member as any)['Plan Name'] || 'Basic Plan',
+      joiningDate: normalizeDateForInput(member.joiningDate || (member as any).joinDate || (member as any).planStartDate || (member as any)['Joining Date'] || (member as any)['Join Date']),
+      membershipExpiry: normalizeDateForInput(member.membershipExpiry || (member as any).expiryDate || (member as any).planExpiryDate || (member as any)['Membership Expiry'] || (member as any)['Expiry Date']),
+      status: String(member.status || (member as any).membershipStatus || (member as any).memberStatus || (member as any)['Membership Status'] || 'Active'),
+      dob: normalizeDateForInput(member.dob || (member as any).dateOfBirth || (member as any)['Date of Birth']),
+      gender: member.gender || (member as any)['Gender'] || 'Male',
+      address: member.address || (member as any)['Address'] || '',
+      emergencyContact: member.emergencyContact || (member as any).emergencyContactNumber || (member as any)['Emergency Contact Number'] || '',
+      fitnessGoal: member.fitnessGoal || (member as any)['Fitness Goal'] || '',
+      medicalCondition: member.medicalCondition || (member as any)['Medical Condition'] || '',
+      remarks: member.remarks || (member as any)['Remarks'] || '',
+    });
+    setEditMemberError('');
+    setIsEditModalOpen(true);
+    console.log('edit modal opened');
+  };
+
+  const handleSaveMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log('SAVE MEMBER CLICKED');
+    console.log('EDIT DATA:', editFormData);
+
+    const rollNoToUse = (
+      editFormData.rollNumber ||
+      editingMember?.rollNumber ||
+      (editingMember as any)?.rollNo ||
+      editingMember?.id ||
+      ''
+    ).trim();
+
+    if (!rollNoToUse) {
+      setEditMemberError('Roll Number / Member ID is required.');
+      return;
+    }
+    if (!editFormData.fullName.trim()) {
       setEditMemberError('Full Name is required.');
       return;
     }
 
+    const targetId = editingMember?.id;
+    const targetRoll = editingMember?.rollNumber || (editingMember as any)?.rollNo || rollNoToUse;
+    const origRoll = editingMember?.rollNumber || (editingMember as any)?.rollNo || rollNoToUse;
+    const regRef = editingMember?.registrationRef || (editingMember as any)?.registrationReferenceNumber || '';
+
+    const payload = {
+      action: 'updateMember',
+      id: targetId || rollNoToUse,
+      rollNumber: rollNoToUse,
+      rollNo: rollNoToUse,
+      originalRollNumber: origRoll,
+      fullName: editFormData.fullName.trim(),
+      name: editFormData.fullName.trim(),
+      phone: editFormData.phone.trim(),
+      phoneNumber: editFormData.phone.trim(),
+      email: editFormData.email.trim(),
+      emailAddress: editFormData.email.trim(),
+      planName: editFormData.planName.trim(),
+      selectedPlan: editFormData.planName.trim(),
+      membershipPlan: editFormData.planName.trim(),
+      joiningDate: editFormData.joiningDate,
+      joinDate: editFormData.joiningDate,
+      membershipExpiry: editFormData.membershipExpiry,
+      planExpiryDate: editFormData.membershipExpiry,
+      expiryDate: editFormData.membershipExpiry,
+      status: editFormData.status,
+      memberStatus: editFormData.status,
+      membershipStatus: editFormData.status,
+      dob: editFormData.dob,
+      dateOfBirth: editFormData.dob,
+      gender: editFormData.gender,
+      address: editFormData.address.trim(),
+      emergencyContact: editFormData.emergencyContact.trim(),
+      emergencyContactNumber: editFormData.emergencyContact.trim(),
+      fitnessGoal: editFormData.fitnessGoal.trim(),
+      medicalCondition: editFormData.medicalCondition.trim(),
+      remarks: editFormData.remarks.trim(),
+      registrationRef: regRef,
+      registrationReferenceNumber: regRef,
+      adminName: 'Admin',
+    };
+
+    console.log('Member ID:', rollNoToUse);
+    console.log('Request payload:', payload);
+
+    // 1. Immediately update Local Storage
+    updateMemberInStorage({
+      ...(editingMember || {}),
+      ...payload,
+      id: targetId || rollNoToUse,
+      rollNumber: rollNoToUse,
+      status: editFormData.status as any,
+    });
+
+    // 2. Immediately update UI state (optimistic update)
+    const updatedMemberObj: Member = normalizeMember({
+      ...(editingMember || {}),
+      ...payload,
+      id: targetId || editingMember?.id || rollNoToUse,
+      rollNumber: rollNoToUse,
+      updatedAt: new Date().toISOString(),
+    }, 0);
+
+    setMembers(prevMembers =>
+      prevMembers.map(m => {
+        const isMatch =
+          (targetId && m.id === targetId) ||
+          (targetRoll && m.rollNumber === targetRoll) ||
+          (origRoll && m.rollNumber === origRoll) ||
+          (m.rollNumber === rollNoToUse);
+        return isMatch ? { ...m, ...updatedMemberObj } : m;
+      })
+    );
+
+    // 3. Immediately close modal and show success toast
+    setIsEditModalOpen(false);
+    setEditingMember(null);
+    setMemberSuccessToast({
+      message: 'Member details updated successfully.',
+      memberName: updatedMemberObj.fullName,
+      rollNumber: updatedMemberObj.rollNumber,
+    });
+
+    // 4. Send update to live Google Sheets backend
     setIsUpdatingMember(true);
     setEditMemberError('');
 
     try {
-      const payload = {
-        action: 'updateMember',
-        rollNumber: editMemberForm.rollNumber.trim(),
-        fullName: editMemberForm.fullName.trim(),
-        phone: editMemberForm.phone.trim(),
-        email: editMemberForm.email.trim(),
-        planName: editMemberForm.planName.trim(),
-        selectedPlan: editMemberForm.planName.trim(),
-        joiningDate: editMemberForm.joiningDate,
-        membershipExpiry: editMemberForm.membershipExpiry,
-        planExpiryDate: editMemberForm.membershipExpiry,
-        status: editMemberForm.status,
-        memberStatus: editMemberForm.status,
-        dob: editMemberForm.dob,
-        gender: editMemberForm.gender,
-        address: editMemberForm.address,
-        emergencyContact: editMemberForm.emergencyContact,
-        remarks: editMemberForm.remarks,
-        adminName: 'Admin',
-      };
-
       const res = await apiService.updateMember(payload);
-      if (res && res.success === false) {
-        setEditMemberError(res.message || 'Failed to update member.');
-        return;
-      }
+      console.log('API response:', res);
 
-      setEditingMember(null);
-      await Promise.all([
+      if (res && res.success === false) {
+        if (
+          res.code !== 'NETWORK_ERROR' &&
+          res.code !== 'HTTP_404' &&
+          res.code !== 'PARSE_ERROR' &&
+          !(res.message && res.message.includes('Unknown action'))
+        ) {
+          console.error('Backend error:', res.message);
+          setEditMemberError(`Failed to update member: ${res.message}`);
+        }
+      } else {
+        console.log('Backend update successful:', res);
+      }
+    } catch (err: any) {
+      console.error('Backend error:', err);
+    } finally {
+      setIsUpdatingMember(false);
+      // Background re-fetch to keep everything in sync
+      Promise.all([
         fetchMembers(),
         fetchDashboard(),
         fetchActivityLogs(),
-      ]);
+      ]).catch(err => {
+        console.warn('[Admin Edit Member] Background refresh warning:', err);
+      });
+    }
+  };
+
+  // Direct Add / Restoration Form State
+  const [isDirectAddModalOpen, setIsDirectAddModalOpen] = useState(false);
+  const [directAddMode, setDirectAddMode] = useState<'auto' | 'custom'>('auto');
+  const [directAddForm, setDirectAddForm] = useState<{
+    rollNumber: string;
+    fullName: string;
+    phone: string;
+    email: string;
+    gender: string;
+    dob: string;
+    planName: string;
+    status: string;
+    joiningDate: string;
+    membershipExpiry: string;
+    registrationFee: number;
+    initialAmountPaid: number;
+    paymentStatus: string;
+    paymentMode: string;
+    address: string;
+    emergencyContact: string;
+    fitnessGoal: string;
+    medicalCondition: string;
+    remarks: string;
+    autoGenerateIdCard: boolean;
+    recordFeePayment: boolean;
+  }>({
+    rollNumber: '',
+    fullName: '',
+    phone: '',
+    email: '',
+    gender: 'Male',
+    dob: '',
+    planName: 'Standard Plan',
+    status: 'Active',
+    joiningDate: new Date().toISOString().split('T')[0],
+    membershipExpiry: '',
+    registrationFee: 100,
+    initialAmountPaid: 100,
+    paymentStatus: 'Successful',
+    paymentMode: 'Cash',
+    address: '',
+    emergencyContact: '',
+    fitnessGoal: 'General Fitness',
+    medicalCondition: '',
+    remarks: 'Direct member registration / restored by admin',
+    autoGenerateIdCard: true,
+    recordFeePayment: true,
+  });
+  const [isSubmittingDirectAdd, setIsSubmittingDirectAdd] = useState(false);
+  const [directAddError, setDirectAddError] = useState('');
+
+  const calculateAutoExpiry = (joinDateStr: string, plan: string) => {
+    const d = new Date(joinDateStr || new Date().toISOString().split('T')[0]);
+    if (isNaN(d.getTime())) return '';
+    const p = (plan || '').toLowerCase();
+    if (p.includes('year') || p.includes('12 month') || p.includes('annual')) {
+      d.setFullYear(d.getFullYear() + 1);
+    } else if (p.includes('6 month') || p.includes('half')) {
+      d.setMonth(d.getMonth() + 6);
+    } else if (p.includes('3 month') || p.includes('quarter')) {
+      d.setMonth(d.getMonth() + 3);
+    } else {
+      d.setMonth(d.getMonth() + 1);
+    }
+    return d.toISOString().split('T')[0];
+  };
+
+  const handleOpenDirectAddModal = () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const expStr = calculateAutoExpiry(todayStr, 'Standard Plan');
+
+    setDirectAddForm({
+      rollNumber: '',
+      fullName: '',
+      phone: '',
+      email: '',
+      gender: 'Male',
+      dob: '',
+      planName: 'Standard Plan',
+      status: 'Active',
+      joiningDate: todayStr,
+      membershipExpiry: expStr,
+      registrationFee: 100,
+      initialAmountPaid: 100,
+      paymentStatus: 'Successful',
+      paymentMode: 'Cash',
+      address: '',
+      emergencyContact: '',
+      fitnessGoal: 'General Fitness',
+      medicalCondition: '',
+      remarks: 'Direct member registration / restored by admin',
+      autoGenerateIdCard: true,
+      recordFeePayment: true,
+    });
+    setDirectAddMode('auto');
+    setDirectAddError('');
+    setIsDirectAddModalOpen(true);
+  };
+
+  const handleDirectAddMemberSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = directAddForm.fullName.trim();
+    if (!name) {
+      setDirectAddError('Full Name is required.');
+      return;
+    }
+    const cleanPhone = directAddForm.phone.replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 10) {
+      setDirectAddError('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
+    if (directAddMode === 'custom' && !directAddForm.rollNumber.trim()) {
+      setDirectAddError('Please enter the custom / restored Roll Number (e.g. ABG-26-0001).');
+      return;
+    }
+
+    setIsSubmittingDirectAdd(true);
+    setDirectAddError('');
+
+    try {
+      const payload = {
+        ...directAddForm,
+        fullName: name,
+        phone: cleanPhone,
+        rollNumber: directAddMode === 'custom' ? directAddForm.rollNumber.trim().toUpperCase() : '',
+        adminName: 'Admin',
+      };
+
+      console.log('SUBMITTING DIRECT MEMBER REGISTRATION / RESTORATION:', payload);
+      const res = await apiService.directAddMember(payload);
+      console.log('Direct Add / Restoration Result:', res);
+
+      const addedMember: Member = res.data || res.member;
+
+      if (addedMember) {
+        setMembers(prev => {
+          const exists = prev.some(m => m.rollNumber === addedMember.rollNumber);
+          return exists ? prev.map(m => m.rollNumber === addedMember.rollNumber ? addedMember : m) : [addedMember, ...prev];
+        });
+      }
+
+      setIsDirectAddModalOpen(false);
+
+      // Trigger Confetti Celebration!
+      try {
+        confetti({
+          particleCount: 60,
+          spread: 70,
+          origin: { y: 0.6 },
+        });
+      } catch {}
+
+      setMemberSuccessToast({
+        message: `Member ${name} (${addedMember?.rollNumber || 'Active'}) directly registered/restored successfully.`,
+        memberName: name,
+        rollNumber: addedMember?.rollNumber,
+      });
+
+      // Auto-open ID Card modal if option is checked
+      if (directAddForm.autoGenerateIdCard && addedMember) {
+        setCardModalMember(addedMember);
+      }
+
+      // Background re-fetch to sync across all tabs
+      Promise.all([
+        fetchMembers(),
+        fetchRegistrations(),
+        fetchFeePayments(),
+        fetchDashboard(),
+        fetchActivityLogs(),
+      ]).catch(err => {
+        console.warn('[Direct Add Member] Background refresh warning:', err);
+      });
     } catch (err: any) {
-      setEditMemberError(err.message || 'Error updating member details.');
+      console.error('Failed to add member directly:', err);
+      setDirectAddError(err.message || 'Failed to register/restore member.');
     } finally {
-      setIsUpdatingMember(false);
+      setIsSubmittingDirectAdd(false);
     }
   };
 
@@ -746,12 +1274,36 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     const token = getSavedAdminToken();
     try {
       const memRes = await apiService.getMembers(token);
+      let remoteMembers: Member[] = [];
       if (memRes && memRes.success !== false) {
         const memData = (memRes as any)?.data?.records ?? (Array.isArray((memRes as any)?.data) ? (memRes as any).data : ((memRes as any)?.records ?? []));
-        setMembers((Array.isArray(memData) ? memData : []).map((m: any, idx: number) => normalizeMember(m, idx)));
+        remoteMembers = (Array.isArray(memData) ? memData : []).map((m: any, idx: number) => normalizeMember(m, idx));
+      }
+
+      const localMembers = getStoredMembers();
+      if (localMembers && localMembers.length > 0) {
+        const mergedMap = new Map<string, Member>();
+        remoteMembers.forEach(m => {
+          const key = (m.rollNumber || m.id || '').trim().toUpperCase();
+          if (key) mergedMap.set(key, m);
+        });
+        localMembers.forEach(m => {
+          const key = (m.rollNumber || m.id || '').trim().toUpperCase();
+          if (key) {
+            const normalizedLocal = normalizeMember(m, 0);
+            const existing = mergedMap.get(key);
+            if (!existing || new Date(m.updatedAt || m.timestamp || 0) >= new Date(existing.updatedAt || existing.timestamp || 0)) {
+              mergedMap.set(key, normalizedLocal);
+            }
+          }
+        });
+        setMembers(Array.from(mergedMap.values()));
+      } else {
+        setMembers(remoteMembers);
       }
     } catch (err) {
       console.error('Error fetching members:', err);
+      setMembers(getStoredMembers().map((m, idx) => normalizeMember(m, idx)));
     }
   }, []);
 
@@ -2474,7 +3026,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
             </div>
 
             {/* Quick Actions */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <button
+                type="button"
+                onClick={handleOpenDirectAddModal}
+                className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer"
+                title="Directly enroll new member or restore past record"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">+ Direct Add / Restore Member</span>
+                <span className="sm:hidden">+ Add Member</span>
+              </button>
+
               <button
                 onClick={loadLiveData}
                 disabled={isLoading}
@@ -2528,6 +3091,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               { id: 'members', label: 'Members', icon: Users, count: members.length, path: '/admin/members' },
               { id: 'fee-records', label: 'Fee Payments', icon: CreditCard, count: feePayments.filter(f => f.status === 'Pending Verification').length, path: '/admin/fee-records' },
               { id: 'payment-history', label: 'Payment History', icon: History, count: feePayments.length, path: '/admin/payment-history' },
+              { id: 'attendance', label: 'QR Attendance', icon: QrCode, count: attendanceRecords.filter(a => a.date === new Date().toISOString().split('T')[0]).length, path: '/admin/attendance' },
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -2842,6 +3406,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   <option value="Approved">Approved</option>
                   <option value="Rejected">Rejected</option>
                 </select>
+
+                <button
+                  type="button"
+                  onClick={handleOpenDirectAddModal}
+                  className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-900/30 transition-all cursor-pointer shrink-0"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">+ Direct Add / Restore</span>
+                  <span className="md:hidden">+ Add</span>
+                </button>
               </div>
             </div>
 
@@ -3021,6 +3595,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                                   <span>View Details</span>
                                 </button>
 
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingRegistration(reg)}
+                                  className="px-2.5 py-1.5 bg-purple-900/40 hover:bg-purple-900/60 text-purple-300 border border-purple-500/30 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                                  title="Edit Registration & Restoration Options"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5 text-purple-400" />
+                                  <span>Edit / Restore</span>
+                                </button>
+
                                 {linkedFee && (linkedFee.paymentStatus === 'Pending Verification' || linkedFee.paymentStatus === 'Pending' || linkedFee.paymentStatus === 'Submitted') && (
                                   <>
                                     <button
@@ -3161,6 +3745,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   <option value="Active">Active</option>
                   <option value="Expired">Expired</option>
                 </select>
+
+                <button
+                  type="button"
+                  onClick={handleOpenDirectAddModal}
+                  className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-900/30 transition-all cursor-pointer shrink-0"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">+ Direct Add / Restore Member</span>
+                  <span className="md:hidden">+ Add Member</span>
+                </button>
               </div>
             </div>
 
@@ -3207,7 +3801,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                         <td className="py-3.5 px-4 text-right">
                           <div className="flex items-center justify-end gap-2 font-sans">
                             <button
-                              onClick={() => setEditingMember(m)}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditMember(m);
+                              }}
                               className="px-2.5 py-1.5 bg-purple-950/60 border border-purple-500/30 hover:bg-purple-900/60 text-purple-300 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer"
                               title="Edit Member Details"
                             >
@@ -3865,7 +4463,132 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
           </div>
         )}
 
-        {/* TAB 6: GOOGLE SHEETS BACKEND SETUP */}
+        {/* TAB 6: QR CODE ATTENDANCE SCANNER */}
+        {activeTab === 'attendance' && (
+          <div className="space-y-6">
+            {/* Header & Scanner Bar */}
+            <div className="bg-[#0F0F12] border border-zinc-800/80 p-6 rounded-3xl shadow-xl space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-black text-white font-mono uppercase tracking-tight flex items-center gap-2.5">
+                    <QrCode className="w-6 h-6 text-red-500" />
+                    <span>Reception Gym Attendance Scanner</span>
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Scan member QR codes or input Roll Numbers for instant reception check-in.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 px-4 py-2 rounded-xl text-xs font-mono text-zinc-300">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Today's Check-ins: <strong className="text-white">{attendanceRecords.filter(a => a.date === new Date().toISOString().split('T')[0]).length}</strong></span>
+                </div>
+              </div>
+
+              {/* Scan Form */}
+              <form onSubmit={handleScanAttendance} className="flex flex-col sm:flex-row items-center gap-3">
+                <div className="relative flex-1 w-full">
+                  <QrCode className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-red-500 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={scanQuery}
+                    onChange={(e) => setScanQuery(e.target.value)}
+                    placeholder="Scan QR code data or enter Member Roll Number (e.g. ABG-2026-001)..."
+                    className="w-full pl-11 pr-4 py-3 bg-[#050505] border border-zinc-800 rounded-xl text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 font-mono"
+                    autoFocus
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full sm:w-auto px-6 py-3 bg-red-600 hover:bg-red-500 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-colors cursor-pointer shrink-0 shadow-lg shadow-red-600/20 flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Mark Attendance</span>
+                </button>
+              </form>
+
+              {/* Notification Banner */}
+              {scanMessage && (
+                <div
+                  className={`p-4 rounded-2xl border flex items-start gap-3.5 animate-in fade-in ${
+                    scanMessage.success
+                      ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                      : 'bg-red-950/40 border-red-500/40 text-red-300'
+                  }`}
+                >
+                  {scanMessage.success ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <XCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                  )}
+                  <div className="space-y-1">
+                    <p className="text-sm font-bold">{scanMessage.text}</p>
+                    {scanMessage.member && (
+                      <p className="text-xs text-zinc-300">
+                        Member: <strong className="text-white">{scanMessage.member.fullName}</strong> | Plan:{' '}
+                        <span className="text-red-400">{scanMessage.member.planName}</span> | Status:{' '}
+                        <span className="text-emerald-400">{scanMessage.member.status}</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Attendance Logs Table */}
+            <div className="bg-[#0F0F12] border border-zinc-800/80 rounded-3xl overflow-hidden shadow-xl">
+              <div className="p-5 border-b border-zinc-800/80 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <History className="w-4 h-4 text-red-500" />
+                  <span>Recent Attendance Logs</span>
+                </h3>
+                <span className="text-xs text-zinc-400 font-mono">
+                  Total Logs: {attendanceRecords.length}
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-zinc-300">
+                  <thead className="bg-[#08080A] text-zinc-400 font-bold uppercase text-[10px] tracking-wider border-b border-zinc-800">
+                    <tr>
+                      <th className="py-3.5 px-4">Member Name</th>
+                      <th className="py-3.5 px-4">Roll Number</th>
+                      <th className="py-3.5 px-4">Plan</th>
+                      <th className="py-3.5 px-4">Check-In Time</th>
+                      <th className="py-3.5 px-4">Date</th>
+                      <th className="py-3.5 px-4 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/60 font-mono">
+                    {attendanceRecords.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-zinc-500">
+                          No attendance scanned today yet. Scan a member pass above.
+                        </td>
+                      </tr>
+                    ) : (
+                      attendanceRecords.map((att) => (
+                        <tr key={att.id} className="hover:bg-zinc-900/40 transition-colors">
+                          <td className="py-3.5 px-4 font-sans font-bold text-white">{att.memberName}</td>
+                          <td className="py-3.5 px-4 text-red-400 font-bold">{att.rollNumber}</td>
+                          <td className="py-3.5 px-4 text-zinc-300 font-sans">{att.planName}</td>
+                          <td className="py-3.5 px-4 text-zinc-200">{att.time}</td>
+                          <td className="py-3.5 px-4 text-zinc-400">{att.date}</td>
+                          <td className="py-3.5 px-4 text-right">
+                            <span className="px-2.5 py-1 rounded-full bg-emerald-950 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold font-sans">
+                              PRESENT
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 7: GOOGLE SHEETS BACKEND SETUP */}
         {activeTab === 'settings' && (
           <div className="space-y-8 max-w-4xl mx-auto">
             {/* SECTION 1: UPI PAYMENT & QR CODE SETTINGS */}
@@ -4178,6 +4901,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
             <div className="pt-2 flex items-center justify-between border-t border-zinc-800">
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const reg = viewRegModal;
+                    setViewRegModal(null);
+                    setEditingRegistration(reg);
+                  }}
+                  className="px-3 py-1.5 bg-purple-900/40 hover:bg-purple-900/60 text-purple-300 border border-purple-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Edit / Restore</span>
+                </button>
                 {!isStatusApproved(viewRegModal.registrationStatus || viewRegModal.status) && (
                   <button
                     type="button"
@@ -4354,7 +5089,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               </div>
               <button
                 type="button"
-                onClick={() => setEditingMember(null)}
+                onClick={() => {
+                  setIsEditModalOpen(false);
+                  setEditingMember(null);
+                }}
                 className="w-8 h-8 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -4368,8 +5106,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               </div>
             )}
 
-            <form onSubmit={handleSaveEditMember} className="space-y-4">
+            <form onSubmit={handleSaveMember} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Roll Number */}
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Roll Number / Member ID *
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.rollNumber}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, rollNumber: e.target.value }))}
+                    placeholder="e.g. ABG-26-0001"
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono font-bold"
+                    required
+                  />
+                </div>
+
                 {/* Full Name */}
                 <div className="sm:col-span-2">
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
@@ -4377,8 +5130,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   </label>
                   <input
                     type="text"
-                    value={editMemberForm.fullName}
-                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, fullName: e.target.value }))}
+                    value={editFormData.fullName}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, fullName: e.target.value }))}
                     className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
                     required
                   />
@@ -4391,8 +5144,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   </label>
                   <input
                     type="text"
-                    value={editMemberForm.phone}
-                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, phone: e.target.value }))}
+                    value={editFormData.phone}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, phone: e.target.value }))}
                     className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
                   />
                 </div>
@@ -4404,8 +5157,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   </label>
                   <input
                     type="email"
-                    value={editMemberForm.email}
-                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, email: e.target.value }))}
+                    value={editFormData.email}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, email: e.target.value }))}
                     className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
                   />
                 </div>
@@ -4417,11 +5170,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   </label>
                   <input
                     type="text"
-                    value={editMemberForm.planName}
-                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, planName: e.target.value }))}
-                    placeholder="e.g. 1 Month Basic"
+                    list="edit-member-plans-list"
+                    value={editFormData.planName}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, planName: e.target.value }))}
+                    placeholder="e.g. Basic Plan"
                     className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
                   />
+                  <datalist id="edit-member-plans-list">
+                    {getStoredPlans().map((p: any) => (
+                      <option key={p.id || p.name} value={p.name} />
+                    ))}
+                  </datalist>
                 </div>
 
                 {/* Member Status */}
@@ -4430,12 +5189,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                     Member Status
                   </label>
                   <select
-                    value={editMemberForm.status}
-                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, status: e.target.value as 'Active' | 'Expired' }))}
+                    value={editFormData.status}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, status: e.target.value }))}
                     className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-sans"
                   >
                     <option value="Active">Active</option>
                     <option value="Expired">Expired</option>
+                    <option value="Payment Due">Payment Due</option>
+                    <option value="Suspended">Suspended</option>
+                    <option value="Pending Activation">Pending Activation</option>
                   </select>
                 </div>
 
@@ -4446,8 +5208,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   </label>
                   <input
                     type="date"
-                    value={editMemberForm.joiningDate}
-                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, joiningDate: e.target.value }))}
+                    value={editFormData.joiningDate}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, joiningDate: e.target.value }))}
                     className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
                   />
                 </div>
@@ -4459,8 +5221,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   </label>
                   <input
                     type="date"
-                    value={editMemberForm.membershipExpiry}
-                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, membershipExpiry: e.target.value }))}
+                    value={editFormData.membershipExpiry}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, membershipExpiry: e.target.value }))}
                     className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
                   />
                 </div>
@@ -4471,8 +5233,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                     Gender
                   </label>
                   <select
-                    value={editMemberForm.gender}
-                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, gender: e.target.value }))}
+                    value={editFormData.gender}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, gender: e.target.value }))}
                     className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-sans"
                   >
                     <option value="Male">Male</option>
@@ -4488,8 +5250,50 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   </label>
                   <input
                     type="date"
-                    value={editMemberForm.dob}
-                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, dob: e.target.value }))}
+                    value={editFormData.dob}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, dob: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+
+                {/* Fitness Goal */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Fitness Goal
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.fitnessGoal}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, fitnessGoal: e.target.value }))}
+                    placeholder="e.g. Muscle Gain, Weight Loss, General Fitness"
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                {/* Medical Condition */}
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Medical Condition (if any)
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.medicalCondition}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, medicalCondition: e.target.value }))}
+                    placeholder="e.g. None, Asthma, Knee injury"
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                {/* Emergency Contact */}
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                    Emergency Contact Number
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.emergencyContact}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, emergencyContact: e.target.value }))}
+                    placeholder="e.g. +91 98765 43210 (Guardian/Contact)"
                     className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
                   />
                 </div>
@@ -4501,21 +5305,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   </label>
                   <input
                     type="text"
-                    value={editMemberForm.address}
-                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, address: e.target.value }))}
+                    value={editFormData.address}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, address: e.target.value }))}
+                    placeholder="Full residential address"
                     className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
                   />
                 </div>
 
-                {/* Emergency Contact */}
+                {/* Remarks / Notes */}
                 <div className="sm:col-span-2">
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Emergency Contact
+                    Remarks / Admin Notes
                   </label>
                   <input
                     type="text"
-                    value={editMemberForm.emergencyContact}
-                    onChange={(e) => setEditMemberForm(prev => ({ ...prev, emergencyContact: e.target.value }))}
+                    value={editFormData.remarks}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, remarks: e.target.value }))}
+                    placeholder="Special instructions or notes"
                     className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
                   />
                 </div>
@@ -4525,7 +5331,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-800">
                 <button
                   type="button"
-                  onClick={() => setEditingMember(null)}
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    setEditingMember(null);
+                  }}
                   disabled={isUpdatingMember}
                   className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition cursor-pointer"
                 >
@@ -4545,6 +5354,643 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                     <>
                       <Check className="w-4 h-4 text-white" />
                       <span>Save Member Details</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit & Restore Registration Modal */}
+      {editingRegistration && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+          <div className="bg-[#141419] border border-zinc-800 rounded-3xl p-6 max-w-xl w-full shadow-2xl space-y-6 my-8">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
+                  <Edit3 className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white font-mono uppercase tracking-wide">
+                    EDIT / RESTORE REGISTRATION
+                  </h3>
+                  <p className="text-xs text-zinc-400">
+                    Ref #: <span className="font-mono text-purple-400 font-bold">{editingRegistration.registrationReferenceNumber || editingRegistration.registrationRef}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingRegistration(null)}
+                className="text-zinc-500 hover:text-white p-1 text-xl font-bold cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            {editRegError && (
+              <div className="p-3 bg-red-950/80 border border-red-500/30 rounded-xl text-xs text-red-300 flex items-center gap-2 font-medium">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{editRegError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditRegistration} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editRegForm.fullName}
+                    onChange={(e) => setEditRegForm(prev => ({ ...prev, fullName: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Phone Number *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editRegForm.phone}
+                    onChange={(e) => setEditRegForm(prev => ({ ...prev, phone: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    value={editRegForm.email}
+                    onChange={(e) => setEditRegForm(prev => ({ ...prev, email: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Selected Plan</label>
+                  <input
+                    type="text"
+                    value={editRegForm.selectedPlan}
+                    onChange={(e) => setEditRegForm(prev => ({ ...prev, selectedPlan: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Registration Status (Restoration / Approval)</label>
+                  <select
+                    value={editRegForm.status}
+                    onChange={(e) => setEditRegForm(prev => ({ ...prev, status: e.target.value as any }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-bold"
+                  >
+                    <option value="Pending Verification">Pending Verification (Restore)</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Rejected">Rejected</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Registration Fee (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editRegForm.registrationFee}
+                    onChange={(e) => setEditRegForm(prev => ({ ...prev, registrationFee: Number(e.target.value) || 0 }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Payment Status</label>
+                  <select
+                    value={editRegForm.paymentStatus}
+                    onChange={(e) => setEditRegForm(prev => ({ ...prev, paymentStatus: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                  >
+                    <option value="Submitted">Submitted</option>
+                    <option value="Successful">Successful</option>
+                    <option value="Pending Verification">Pending Verification</option>
+                    <option value="Failed">Failed</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Gender</label>
+                  <select
+                    value={editRegForm.gender}
+                    onChange={(e) => setEditRegForm(prev => ({ ...prev, gender: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                  >
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Date of Birth</label>
+                  <input
+                    type="date"
+                    value={editRegForm.dob}
+                    onChange={(e) => setEditRegForm(prev => ({ ...prev, dob: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Emergency Contact</label>
+                  <input
+                    type="text"
+                    value={editRegForm.emergencyContact}
+                    onChange={(e) => setEditRegForm(prev => ({ ...prev, emergencyContact: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Address</label>
+                <input
+                  type="text"
+                  value={editRegForm.address}
+                  onChange={(e) => setEditRegForm(prev => ({ ...prev, address: e.target.value }))}
+                  className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Admin Remarks</label>
+                <input
+                  type="text"
+                  placeholder="Optional notes or restoration reason..."
+                  value={editRegForm.adminRemarks}
+                  onChange={(e) => setEditRegForm(prev => ({ ...prev, adminRemarks: e.target.value }))}
+                  className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              {editRegForm.status === 'Rejected' && (
+                <div>
+                  <label className="block text-[11px] font-bold text-red-400 uppercase tracking-wider mb-1">Rejection Reason</label>
+                  <input
+                    type="text"
+                    placeholder="Reason for rejecting..."
+                    value={editRegForm.rejectionReason}
+                    onChange={(e) => setEditRegForm(prev => ({ ...prev, rejectionReason: e.target.value }))}
+                    className="w-full bg-[#0F0F12] border border-red-900/60 rounded-xl px-3 py-2 text-xs text-red-200 focus:outline-none focus:border-red-500"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingRegistration(null)}
+                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingRegistration}
+                  className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-lg shadow-purple-600/20 cursor-pointer disabled:opacity-50"
+                >
+                  {isUpdatingRegistration ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Save Registration Changes</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Direct Add / Member Restoration Form Modal */}
+      {isDirectAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+          <div className="bg-[#141419] border border-zinc-800 rounded-3xl p-6 max-w-3xl w-full shadow-2xl space-y-6 my-8 max-h-[92vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                  <UserPlus className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-black text-white font-mono uppercase tracking-wide">
+                      Direct Member Registration & Restoration
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold font-mono">
+                      Admin Direct Entry
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400">
+                    Directly enroll walk-in members or restore past offline records with instant ID card generation.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDirectAddModalOpen(false)}
+                className="text-zinc-500 hover:text-white p-1 text-xl font-bold cursor-pointer rounded-lg hover:bg-zinc-800 transition"
+              >
+                &times;
+              </button>
+            </div>
+
+            {directAddError && (
+              <div className="p-3.5 bg-red-950/80 border border-red-500/30 rounded-xl text-xs text-red-300 flex items-center gap-2 font-medium">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{directAddError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleDirectAddMemberSubmit} className="space-y-6">
+              {/* Roll Number Mode Selection */}
+              <div className="p-4 bg-[#0A0A0D] border border-zinc-800/80 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    Roll Number Generation / Assignment Mode
+                  </label>
+                  <span className="text-[11px] text-zinc-500 font-mono">
+                    Pattern: ABG-YY-XXXX
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setDirectAddMode('auto')}
+                    className={`p-3 rounded-xl border text-left flex items-start gap-3 transition cursor-pointer ${
+                      directAddMode === 'auto'
+                        ? 'bg-emerald-950/30 border-emerald-500 text-white'
+                        : 'bg-[#0F0F12] border-zinc-800 text-zinc-400 hover:border-zinc-700'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full border mt-0.5 flex items-center justify-center shrink-0 ${
+                      directAddMode === 'auto' ? 'border-emerald-400 bg-emerald-500' : 'border-zinc-600'
+                    }`}>
+                      {directAddMode === 'auto' && <div className="w-1.5 h-1.5 rounded-full bg-black" />}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white">Auto-Generate from Phone</div>
+                      <div className="text-[11px] text-zinc-400 mt-0.5">
+                        Assigns <code className="text-emerald-400 font-mono">ABG-{new Date().getFullYear().toString().slice(-2)}-{directAddForm.phone.replace(/\D/g, '').slice(-4) || 'XXXX'}</code> automatically.
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDirectAddMode('custom')}
+                    className={`p-3 rounded-xl border text-left flex items-start gap-3 transition cursor-pointer ${
+                      directAddMode === 'custom'
+                        ? 'bg-purple-950/30 border-purple-500 text-white'
+                        : 'bg-[#0F0F12] border-zinc-800 text-zinc-400 hover:border-zinc-700'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full border mt-0.5 flex items-center justify-center shrink-0 ${
+                      directAddMode === 'custom' ? 'border-purple-400 bg-purple-500' : 'border-zinc-600'
+                    }`}>
+                      {directAddMode === 'custom' && <div className="w-1.5 h-1.5 rounded-full bg-black" />}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white">Custom / Restored Roll Number</div>
+                      <div className="text-[11px] text-zinc-400 mt-0.5">
+                        Manually enter historical Roll No (e.g. <code className="text-purple-400 font-mono">ABG-25-0012</code> or <code className="text-purple-400 font-mono">ABG-26-0001</code>).
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                {directAddMode === 'custom' && (
+                  <div className="pt-2 animate-in fade-in">
+                    <label className="block text-[11px] font-bold text-purple-300 uppercase tracking-wider mb-1">
+                      Custom Roll Number * (Restoration)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. ABG-26-0001 or ABG-25-0012"
+                      value={directAddForm.rollNumber}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, rollNumber: e.target.value.toUpperCase() }))}
+                      className="w-full bg-[#141419] border border-purple-500/50 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-purple-400 font-mono font-bold"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Section 1: Basic & Contact Info */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2 border-b border-zinc-800 pb-1.5">
+                  <Users className="w-3.5 h-3.5 text-emerald-400" />
+                  1. Athlete Personal & Contact Information
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="sm:col-span-2 md:col-span-1">
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Full Name *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Rahul Sharma"
+                      value={directAddForm.fullName}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, fullName: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Phone Number * (10 Digits)</label>
+                    <input
+                      type="tel"
+                      required
+                      maxLength={10}
+                      placeholder="9876543210"
+                      value={directAddForm.phone}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, phone: e.target.value.replace(/\D/g, '') }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Email Address</label>
+                    <input
+                      type="email"
+                      placeholder="athlete@example.com"
+                      value={directAddForm.email}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, email: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Gender</label>
+                    <select
+                      value={directAddForm.gender}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, gender: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Date of Birth</label>
+                    <input
+                      type="date"
+                      value={directAddForm.dob}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, dob: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Emergency Contact</label>
+                    <input
+                      type="tel"
+                      placeholder="9876543210"
+                      value={directAddForm.emergencyContact}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, emergencyContact: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: Membership & Validity */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2 border-b border-zinc-800 pb-1.5">
+                  <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
+                  2. Membership Plan & Validity
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Selected Plan</label>
+                    <select
+                      value={directAddForm.planName}
+                      onChange={(e) => {
+                        const newPlan = e.target.value;
+                        const exp = calculateAutoExpiry(directAddForm.joiningDate, newPlan);
+                        setDirectAddForm(prev => ({
+                          ...prev,
+                          planName: newPlan,
+                          membershipExpiry: exp,
+                        }));
+                      }}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-bold"
+                    >
+                      <option value="Basic Plan">Basic Plan (1 Month)</option>
+                      <option value="Standard Plan">Standard Plan (3 Months)</option>
+                      <option value="Premium Plan">Premium Plan (6 Months)</option>
+                      <option value="Annual VIP Plan">Annual VIP Plan (12 Months)</option>
+                      <option value="Custom Plan">Custom Plan</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Membership Status</label>
+                    <select
+                      value={directAddForm.status}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, status: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-bold"
+                    >
+                      <option value="Active">Active (Approved)</option>
+                      <option value="Pending">Pending Verification</option>
+                      <option value="Expired">Expired</option>
+                      <option value="Payment Due">Payment Due</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Joining Date</label>
+                    <input
+                      type="date"
+                      value={directAddForm.joiningDate}
+                      onChange={(e) => {
+                        const jDate = e.target.value;
+                        const exp = calculateAutoExpiry(jDate, directAddForm.planName);
+                        setDirectAddForm(prev => ({
+                          ...prev,
+                          joiningDate: jDate,
+                          membershipExpiry: exp,
+                        }));
+                      }}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Membership Expiry</label>
+                    <input
+                      type="date"
+                      value={directAddForm.membershipExpiry}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, membershipExpiry: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 3: Initial Fee & Payment */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2 border-b border-zinc-800 pb-1.5">
+                  <IndianRupee className="w-3.5 h-3.5 text-emerald-400" />
+                  3. Initial Registration Fee & Payment
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Registration / Initial Fee (₹)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={directAddForm.registrationFee}
+                      onChange={(e) => {
+                        const val = Number(e.target.value) || 0;
+                        setDirectAddForm(prev => ({
+                          ...prev,
+                          registrationFee: val,
+                          initialAmountPaid: val,
+                        }));
+                      }}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Payment Status</label>
+                    <select
+                      value={directAddForm.paymentStatus}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, paymentStatus: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-bold"
+                    >
+                      <option value="Successful">Successful (Paid)</option>
+                      <option value="Pending Verification">Pending Verification</option>
+                      <option value="Exempted">Exempted / Zero Fee</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Payment Mode</label>
+                    <select
+                      value={directAddForm.paymentMode}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, paymentMode: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="Cash">Cash (Front Desk)</option>
+                      <option value="UPI">UPI / QR Code</option>
+                      <option value="Card">Credit / Debit Card</option>
+                      <option value="Bank Transfer">Bank Transfer (NEFT/IMPS)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 4: Address, Goal & Admin Notes */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2 border-b border-zinc-800 pb-1.5">
+                  <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                  4. Address, Fitness Goal & Restoration Notes
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Address / Location</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 12, Main Market, Civil Lines"
+                      value={directAddForm.address}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, address: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Fitness Goal</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Muscle Building, Weight Loss"
+                      value={directAddForm.fitnessGoal}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, fitnessGoal: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Admin Remarks / Restoration Notes</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Front desk direct walk-in enrollment / Restored from offline register"
+                      value={directAddForm.remarks}
+                      onChange={(e) => setDirectAddForm(prev => ({ ...prev, remarks: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Automation Checkboxes */}
+              <div className="p-3.5 bg-[#0A0A0D] border border-zinc-800/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={directAddForm.autoGenerateIdCard}
+                    onChange={(e) => setDirectAddForm(prev => ({ ...prev, autoGenerateIdCard: e.target.checked }))}
+                    className="rounded border-zinc-700 text-emerald-500 focus:ring-emerald-500"
+                  />
+                  <span>Immediately preview & download Member Digital ID Card</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={directAddForm.recordFeePayment}
+                    onChange={(e) => setDirectAddForm(prev => ({ ...prev, recordFeePayment: e.target.checked }))}
+                    className="rounded border-zinc-700 text-emerald-500 focus:ring-emerald-500"
+                  />
+                  <span>Record initial payment in Fee Payments ledger</span>
+                </label>
+              </div>
+
+              {/* Modal Footer Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setIsDirectAddModalOpen(false)}
+                  disabled={isSubmittingDirectAdd}
+                  className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isSubmittingDirectAdd}
+                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-lg shadow-emerald-900/40 cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmittingDirectAdd ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Saving to Database & Google Sheets...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-4 h-4 text-white" />
+                      <span>Register & Restore Member</span>
                     </>
                   )}
                 </button>
@@ -5127,6 +6573,50 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Member Update Success Toast */}
+      {memberSuccessToast && (
+        <div className="fixed bottom-6 right-6 z-[100] max-w-md w-full bg-[#141419] border-2 border-purple-500 rounded-3xl p-5 shadow-2xl animate-in slide-in-from-bottom-5 text-white font-sans space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-black text-purple-400 uppercase tracking-wide">
+                  Member Details Updated
+                </h4>
+                <p className="text-xs text-zinc-300 mt-0.5">
+                  {memberSuccessToast.message}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setMemberSuccessToast(null)}
+              className="text-zinc-500 hover:text-white transition p-1"
+            >
+              <XCircle className="w-5 h-5" />
+            </button>
+          </div>
+
+          {(memberSuccessToast.memberName || memberSuccessToast.rollNumber) && (
+            <div className="bg-[#0F0F12] border border-zinc-800/80 rounded-2xl p-3 space-y-1 font-mono text-xs">
+              {memberSuccessToast.memberName && (
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-500">Member:</span>
+                  <span className="text-white font-bold">{memberSuccessToast.memberName}</span>
+                </div>
+              )}
+              {memberSuccessToast.rollNumber && (
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-500">Roll Number:</span>
+                  <span className="text-purple-400 font-bold">{memberSuccessToast.rollNumber}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

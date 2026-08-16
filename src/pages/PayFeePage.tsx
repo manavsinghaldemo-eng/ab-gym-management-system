@@ -880,6 +880,23 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
       console.log('Fee backend response:', result);
 
       if (result && result.success === true) {
+        const feeRefNum = String(result.data?.feeReferenceNumber || result.feeReferenceNumber || 'ABG-FEE-' + Date.now().toString().slice(-6));
+        const memberEmail = payload.email || verifiedRecord?.email || '';
+        const memberFullName = payload.fullName || verifiedRecord?.fullName || '';
+
+        // Dispatch automatic fee payment confirmation email trigger
+        if (memberEmail) {
+          apiService.sendConfirmationEmail({
+            type: 'fee_payment',
+            email: memberEmail,
+            fullName: memberFullName,
+            feeRef: feeRefNum,
+            amountPaid: amountPaidNum,
+            paymentMethod: paymentMethod,
+            rollNumber: String(result.data?.rollNumber || result.rollNumber || verifiedRollNumber || ''),
+          }).catch(() => {});
+        }
+
         onNavigate('/fee-payment-success', {
           feeReferenceNumber: String(result.data?.feeReferenceNumber || result.feeReferenceNumber || 'ABG-FEE-' + Date.now().toString().slice(-6)),
           registrationReferenceNumber: String(

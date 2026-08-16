@@ -7,6 +7,7 @@ import {
   GalleryItem,
   GymSettings,
   ActivityLogRecord,
+  AttendanceRecord,
 } from '../types';
 
 import {
@@ -935,43 +936,96 @@ export function getMemberFeeHistory(data: {
 export function updateMemberInStorage(updatedData: Partial<Member> & { rollNumber: string }) {
   const members = getStoredMembers();
   const rollClean = (updatedData.rollNumber || '').trim().toUpperCase();
+  const origRollClean = ((updatedData as any).originalRollNumber || '').trim().toUpperCase();
+  const regRefClean = (updatedData.registrationRef || (updatedData as any).registrationReferenceNumber || '').trim().toUpperCase();
+  const rollAlphanumeric = rollClean.replace(/[^A-Z0-9]/g, '');
+
   const idx = members.findIndex(
-    m => (m.rollNumber || '').trim().toUpperCase() === rollClean || (updatedData.id && m.id === updatedData.id)
+    m => (updatedData.id && m.id === updatedData.id) ||
+         (m.rollNumber || '').trim().toUpperCase() === rollClean ||
+         (origRollClean && (m.rollNumber || '').trim().toUpperCase() === origRollClean) ||
+         (regRefClean && (m.registrationRef || (m as any).registrationReferenceNumber || '').trim().toUpperCase() === regRefClean) ||
+         ((m.rollNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '') === rollAlphanumeric && rollAlphanumeric.length > 0)
   );
 
   let updatedMemberObj: Member;
 
   if (idx !== -1) {
+    const existing = members[idx];
+    const newPlan = updatedData.planName || updatedData.selectedPlan || updatedData.membershipPlan || existing.planName || 'Basic Plan';
+    const newJoining = updatedData.joiningDate || updatedData.joinDate || existing.joiningDate || existing.joinDate || new Date().toISOString().split('T')[0];
+    const newExpiry = updatedData.membershipExpiry || updatedData.planExpiryDate || updatedData.expiryDate || existing.membershipExpiry || existing.expiryDate || '';
+    const newStatus = updatedData.status || updatedData.membershipStatus || updatedData.memberStatus || existing.status || 'Active';
+
     updatedMemberObj = {
-      ...members[idx],
+      ...existing,
       ...updatedData,
-      fullName: updatedData.fullName !== undefined ? updatedData.fullName : members[idx].fullName,
-      phone: updatedData.phone !== undefined ? updatedData.phone : members[idx].phone,
-      email: updatedData.email !== undefined ? updatedData.email : members[idx].email,
-      planName: updatedData.planName !== undefined ? updatedData.planName : (updatedData.selectedPlan || members[idx].planName),
-      membershipExpiry: updatedData.membershipExpiry !== undefined ? updatedData.membershipExpiry : (updatedData.planExpiryDate || members[idx].membershipExpiry),
-      joiningDate: updatedData.joiningDate !== undefined ? updatedData.joiningDate : members[idx].joiningDate,
-      status: updatedData.status !== undefined ? updatedData.status : members[idx].status,
+      id: existing.id || updatedData.id || `mem-${Date.now()}`,
+      rollNumber: updatedData.rollNumber || existing.rollNumber,
+      rollNo: updatedData.rollNumber || existing.rollNumber,
+      fullName: updatedData.fullName || updatedData.name || existing.fullName,
+      name: updatedData.fullName || updatedData.name || existing.fullName,
+      phone: updatedData.phone || updatedData.phoneNumber || existing.phone,
+      phoneNumber: updatedData.phone || updatedData.phoneNumber || existing.phone,
+      email: updatedData.email || updatedData.emailAddress || existing.email,
+      emailAddress: updatedData.email || updatedData.emailAddress || existing.email,
+      planName: newPlan,
+      selectedPlan: newPlan,
+      membershipPlan: newPlan,
+      joiningDate: newJoining,
+      joinDate: newJoining,
+      membershipExpiry: newExpiry,
+      expiryDate: newExpiry,
+      planExpiryDate: newExpiry,
+      status: newStatus as any,
+      membershipStatus: newStatus as any,
+      dob: updatedData.dob || updatedData.dateOfBirth || existing.dob,
+      dateOfBirth: updatedData.dob || updatedData.dateOfBirth || existing.dob,
+      gender: updatedData.gender || existing.gender || 'Male',
+      address: updatedData.address || existing.address || '',
+      emergencyContact: updatedData.emergencyContact || updatedData.emergencyContactNumber || existing.emergencyContact || '',
+      emergencyContactNumber: updatedData.emergencyContact || updatedData.emergencyContactNumber || existing.emergencyContact || '',
+      fitnessGoal: updatedData.fitnessGoal !== undefined ? updatedData.fitnessGoal : existing.fitnessGoal || '',
+      medicalCondition: updatedData.medicalCondition !== undefined ? updatedData.medicalCondition : existing.medicalCondition || '',
+      remarks: updatedData.remarks !== undefined ? updatedData.remarks : existing.remarks || '',
       updatedAt: new Date().toISOString(),
     };
     members[idx] = updatedMemberObj;
     saveMembers(members);
   } else {
+    const newPlan = updatedData.planName || updatedData.selectedPlan || updatedData.membershipPlan || 'Basic Plan';
+    const newJoining = updatedData.joiningDate || updatedData.joinDate || new Date().toISOString().split('T')[0];
+    const newExpiry = updatedData.membershipExpiry || updatedData.planExpiryDate || updatedData.expiryDate || '';
+    const newStatus = updatedData.status || updatedData.membershipStatus || updatedData.memberStatus || 'Active';
+
     updatedMemberObj = {
       id: updatedData.id || `mem-${Date.now()}`,
       rollNumber: updatedData.rollNumber,
+      rollNo: updatedData.rollNumber,
       registrationRef: updatedData.registrationRef || `REG-${updatedData.rollNumber}`,
-      fullName: updatedData.fullName || '',
-      phone: updatedData.phone || '',
-      email: updatedData.email || '',
-      planName: updatedData.planName || updatedData.selectedPlan || 'Basic Plan',
-      joiningDate: updatedData.joiningDate || new Date().toISOString().split('T')[0],
-      membershipExpiry: updatedData.membershipExpiry || updatedData.planExpiryDate || '',
-      status: updatedData.status || 'Active',
-      dob: updatedData.dob || '',
+      fullName: updatedData.fullName || updatedData.name || '',
+      name: updatedData.fullName || updatedData.name || '',
+      phone: updatedData.phone || updatedData.phoneNumber || '',
+      phoneNumber: updatedData.phone || updatedData.phoneNumber || '',
+      email: updatedData.email || updatedData.emailAddress || '',
+      emailAddress: updatedData.email || updatedData.emailAddress || '',
+      planName: newPlan,
+      selectedPlan: newPlan,
+      membershipPlan: newPlan,
+      joiningDate: newJoining,
+      joinDate: newJoining,
+      membershipExpiry: newExpiry,
+      expiryDate: newExpiry,
+      planExpiryDate: newExpiry,
+      status: newStatus as any,
+      membershipStatus: newStatus as any,
+      dob: updatedData.dob || updatedData.dateOfBirth || '',
+      dateOfBirth: updatedData.dob || updatedData.dateOfBirth || '',
       gender: updatedData.gender || 'Male',
       address: updatedData.address || '',
-      emergencyContact: updatedData.emergencyContact || '',
+      emergencyContact: updatedData.emergencyContact || updatedData.emergencyContactNumber || '',
+      emergencyContactNumber: updatedData.emergencyContact || updatedData.emergencyContactNumber || '',
+      remarks: updatedData.remarks || '',
       fitnessGoal: updatedData.fitnessGoal || '',
       timestamp: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -1010,6 +1064,200 @@ export function updateMemberInStorage(updatedData: Partial<Member> & { rollNumbe
     data: updatedMemberObj,
     member: updatedMemberObj,
   };
+}
+
+export function directAddMemberToStorage(memberData: {
+  rollNumber?: string;
+  fullName: string;
+  phone: string;
+  email?: string;
+  gender?: string;
+  dob?: string;
+  planName?: string;
+  status?: string;
+  joiningDate?: string;
+  membershipExpiry?: string;
+  registrationFee?: number;
+  initialAmountPaid?: number;
+  paymentStatus?: string;
+  paymentMode?: string;
+  address?: string;
+  emergencyContact?: string;
+  fitnessGoal?: string;
+  medicalCondition?: string;
+  remarks?: string;
+  adminName?: string;
+}) {
+  const members = getStoredMembers();
+  const regs = getStoredRegistrations();
+  const payments = getStoredPayments();
+
+  const phone = (memberData.phone || '').trim();
+  const cleanDigits = phone.replace(/\D/g, '');
+  const mobileLast4 = cleanDigits.length >= 4 ? cleanDigits.slice(-4) : '0001';
+  const yy = new Date().getFullYear().toString().slice(-2);
+  
+  let roll = (memberData.rollNumber || '').trim().toUpperCase();
+  if (!roll) {
+    let candidate = `ABG-${yy}-${mobileLast4}`;
+    const existingRolls = new Set(members.map(m => (m.rollNumber || '').toUpperCase()));
+    if (existingRolls.has(candidate)) {
+      let counter = 2;
+      while (existingRolls.has(`${candidate}-${counter < 10 ? '0' + counter : counter}`)) {
+        counter++;
+      }
+      candidate = `${candidate}-${counter < 10 ? '0' + counter : counter}`;
+    }
+    roll = candidate;
+  }
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const todayStr = nowIso.split('T')[0];
+  const randFour = Math.floor(1000 + Math.random() * 9000);
+  const regRef = `ABG-REG-${yy}${('0' + (now.getMonth() + 1)).slice(-2)}${('0' + now.getDate()).slice(-2)}-${randFour}`;
+
+  const plan = memberData.planName || 'Basic Plan';
+  const joinDate = memberData.joiningDate || todayStr;
+  let expiryDate = memberData.membershipExpiry || '';
+  if (!expiryDate) {
+    const d = new Date(joinDate);
+    d.setMonth(d.getMonth() + 1);
+    expiryDate = isNaN(d.getTime()) ? todayStr : d.toISOString().split('T')[0];
+  }
+
+  const status = memberData.status || 'Active';
+  const fee = Number(memberData.registrationFee ?? memberData.initialAmountPaid ?? 100);
+  const payStatus = memberData.paymentStatus || 'Successful';
+
+  const newMemberObj: Member = {
+    id: `mem-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    rollNumber: roll,
+    rollNo: roll,
+    registrationRef: regRef,
+    fullName: memberData.fullName.trim(),
+    name: memberData.fullName.trim(),
+    phone: phone,
+    phoneNumber: phone,
+    email: (memberData.email || '').trim(),
+    emailAddress: (memberData.email || '').trim(),
+    gender: (memberData.gender as any) || 'Male',
+    dob: memberData.dob || '',
+    dateOfBirth: memberData.dob || '',
+    address: memberData.address || '',
+    emergencyContact: memberData.emergencyContact || '',
+    emergencyContactNumber: memberData.emergencyContact || '',
+    planName: plan,
+    selectedPlan: plan,
+    membershipPlan: plan,
+    fitnessGoal: memberData.fitnessGoal || '',
+    medicalCondition: memberData.medicalCondition || '',
+    joiningDate: joinDate,
+    joinDate: joinDate,
+    membershipExpiry: expiryDate,
+    planExpiryDate: expiryDate,
+    expiryDate: expiryDate,
+    registrationFeePaid: fee,
+    previousBalance: 0,
+    status: status as any,
+    membershipStatus: status as any,
+    memberStatus: status as any,
+    lastPaymentDate: payStatus === 'Successful' ? todayStr : 'None',
+    lastPaymentAmount: payStatus === 'Successful' ? fee : 0,
+    lastPaymentStatus: payStatus,
+    remarks: memberData.remarks || 'Direct member registration / restored by admin',
+    createdBy: memberData.adminName || 'Admin',
+    timestamp: nowIso,
+    updatedAt: nowIso,
+  };
+
+  // Upsert member: replace if roll matches or prepend
+  const existingIdx = members.findIndex(m => (m.rollNumber || '').toUpperCase() === roll);
+  if (existingIdx !== -1) {
+    members[existingIdx] = { ...members[existingIdx], ...newMemberObj };
+  } else {
+    members.unshift(newMemberObj);
+  }
+  saveMembers(members);
+
+  // Add corresponding registration record (Approved)
+  const newReg: RegistrationRequest = {
+    id: `reg-${Date.now()}`,
+    registrationRef: regRef,
+    registrationReferenceNumber: regRef,
+    referenceNumber: regRef,
+    rollNumber: roll,
+    fullName: memberData.fullName.trim(),
+    phone: phone,
+    phoneNumber: phone,
+    email: memberData.email || '',
+    emailAddress: memberData.email || '',
+    gender: (memberData.gender as any) || 'Male',
+    dob: memberData.dob || '',
+    dateOfBirth: memberData.dob || '',
+    address: memberData.address || '',
+    emergencyContact: memberData.emergencyContact || '',
+    emergencyContactNumber: memberData.emergencyContact || '',
+    selectedPlan: plan,
+    planName: plan,
+    fitnessGoal: memberData.fitnessGoal || '',
+    medicalCondition: memberData.medicalCondition || '',
+    registrationFee: fee,
+    paymentMethod: (memberData.paymentMode as any) || 'Cash',
+    paymentStatus: payStatus as any,
+    registrationStatus: 'Approved',
+    status: 'Approved',
+    approvedBy: memberData.adminName || 'Admin',
+    approvedDate: todayStr,
+    timestamp: nowIso,
+    adminRemarks: memberData.remarks || 'Direct registration / restored by Admin',
+  };
+  regs.unshift(newReg);
+  saveRegistrations(regs);
+
+  // Add fee payment if fee > 0 and marked paid/successful
+  if (fee > 0 && payStatus === 'Successful') {
+    const randThree = Math.floor(100 + Math.random() * 900);
+    const feeRef = `ABG-FEE-${yy}${('0' + (now.getMonth() + 1)).slice(-2)}${('0' + now.getDate()).slice(-2)}-${randThree}`;
+    const newFee: FeePaymentRecord = {
+      id: `fee-${Date.now()}`,
+      feeReferenceNumber: feeRef,
+      registrationRef: regRef,
+      rollNumber: roll,
+      memberName: memberData.fullName.trim(),
+      phone: phone,
+      email: memberData.email || '',
+      selectedPlan: plan,
+      feeDuration: '1 Month',
+      regularPlanAmount: fee,
+      discountAmount: 0,
+      totalPayableAmount: fee,
+      amountPaid: fee,
+      remainingBalance: 0,
+      paymentMethod: memberData.paymentMode || 'Cash',
+      transactionId: `DIR-${Date.now().toString().slice(-6)}`,
+      paymentStatus: 'Successful',
+      status: 'Successful',
+      paymentDate: todayStr,
+      timestamp: nowIso,
+      verifiedBy: memberData.adminName || 'Admin',
+      notes: memberData.remarks || 'Direct registration initial fee payment',
+    };
+    payments.unshift(newFee);
+    savePayments(payments);
+  }
+
+  logAdminActivity(
+    memberData.adminName || 'Admin',
+    'Direct Member Registered / Restored',
+    'Member',
+    roll,
+    'None',
+    status,
+    `Directly registered/restored ${newMemberObj.fullName} (${roll}) - Plan: ${plan}`
+  );
+
+  return newMemberObj;
 }
 
 export function fallbackAdminSubmitFeePayment(formData: any) {
@@ -1087,6 +1335,101 @@ export function fallbackAdminSubmitFeePayment(formData: any) {
     feeReferenceNumber: feeRef,
     remainingBalance: remBal,
     data: newFeeRecord,
+  };
+}
+
+const ATTENDANCE_KEY = 'ab_gym_attendance_records';
+
+export function getStoredAttendance(): AttendanceRecord[] {
+  try {
+    const raw = localStorage.getItem(ATTENDANCE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+export function saveAttendance(records: AttendanceRecord[]) {
+  try {
+    localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(records));
+  } catch (err) {
+    console.error('Error saving attendance records:', err);
+  }
+}
+
+export function markMemberAttendance(query: string, scanSource = 'Reception QR Scanner'): {
+  success: boolean;
+  message: string;
+  member?: Member;
+  record?: AttendanceRecord;
+} {
+  const members = getStoredMembers();
+  const clean = query.trim().toUpperCase();
+  const alphanumeric = clean.replace(/[^A-Z0-9]/g, '');
+
+  let rollToFind = clean;
+  let parsedJson: any = null;
+
+  if (query.trim().startsWith('{') && query.trim().endsWith('}')) {
+    try {
+      parsedJson = JSON.parse(query.trim());
+      if (parsedJson.rollNumber) {
+        rollToFind = parsedJson.rollNumber.trim().toUpperCase();
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const member = members.find(m => {
+    const mRoll = (m.rollNumber || m.id || '').trim().toUpperCase();
+    const mAlpha = mRoll.replace(/[^A-Z0-9]/g, '');
+    return mRoll === rollToFind || (alphanumeric.length > 0 && mAlpha === alphanumeric);
+  });
+
+  if (!member) {
+    return {
+      success: false,
+      message: `No gym member record found matching "${rollToFind || query}".`,
+    };
+  }
+
+  const attendanceList = getStoredAttendance();
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0];
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  const record: AttendanceRecord = {
+    id: `att-${Date.now()}`,
+    timestamp: now.toISOString(),
+    rollNumber: member.rollNumber,
+    memberName: member.fullName,
+    planName: member.planName || member.membershipPlan || 'Basic Plan',
+    status: member.status || 'Active',
+    date: dateStr,
+    time: timeStr,
+    scanSource,
+  };
+
+  attendanceList.unshift(record);
+  saveAttendance(attendanceList);
+
+  logAdminActivity(
+    'Reception',
+    'Attendance Marked via QR Scan',
+    'Attendance',
+    member.rollNumber,
+    'Present',
+    'Present',
+    `Member: ${member.fullName} (${member.rollNumber})`
+  );
+
+  return {
+    success: true,
+    message: `Attendance marked successfully for ${member.fullName}!`,
+    member,
+    record,
   };
 }
 

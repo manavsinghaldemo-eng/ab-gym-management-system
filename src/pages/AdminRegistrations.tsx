@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { RegistrationRequest } from '../types';
 import { apiService, getSavedAdminToken } from '../lib/api';
-import { Check, CheckCircle2, Eye, Loader2, XCircle, Search, RefreshCw, X } from 'lucide-react';
+import { Check, CheckCircle2, Eye, Loader2, XCircle, Search, RefreshCw, X, Edit3 } from 'lucide-react';
 
 export interface AdminRegistrationsProps {
   registrations: RegistrationRequest[];
@@ -15,6 +15,7 @@ export interface AdminRegistrationsProps {
   onViewDetails?: (reg: RegistrationRequest) => void;
   onViewScreenshot?: (url: string) => void;
   onReject?: (reg: RegistrationRequest) => void;
+  onEdit?: (reg: RegistrationRequest) => void;
 }
 
 /**
@@ -119,6 +120,7 @@ export const AdminRegistrations: React.FC<AdminRegistrationsProps> = ({
   onViewDetails,
   onViewScreenshot,
   onReject,
+  onEdit,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
@@ -335,6 +337,17 @@ export const AdminRegistrations: React.FC<AdminRegistrationsProps> = ({
                             >
                               <Eye className="w-3.5 h-3.5" />
                               <span>Details</span>
+                            </button>
+                          )}
+
+                          {onEdit && (
+                            <button
+                              onClick={() => onEdit(reg)}
+                              className="px-2.5 py-1.5 bg-purple-900/40 hover:bg-purple-900/60 text-purple-300 border border-purple-500/30 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                              title="Edit Registration & Restoration Options"
+                            >
+                              <Edit3 className="w-3.5 h-3.5 text-purple-400" />
+                              <span>Edit / Restore</span>
                             </button>
                           )}
 

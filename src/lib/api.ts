@@ -20,6 +20,7 @@ import {
   getMemberFeeHistory as getMemberFeeHistoryStorage,
   evaluateFeePaymentBlockingStorage,
   updateMemberInStorage,
+  directAddMemberToStorage,
   fallbackAdminSubmitFeePayment,
 } from './storage';
 
@@ -151,6 +152,7 @@ async function fallbackAppsScriptBackend<T>(
     'getActivityLogs',
     'updateRegistrationStatus',
     'updateFeeStatus',
+    'updateMember',
   ].includes(action);
 
   if (isProtectedAdminAction) {
@@ -269,32 +271,52 @@ async function fallbackAppsScriptBackend<T>(
     };
   }
 
-  if (action === 'updateRegistrationStatus') {
+  if (action === 'updateRegistrationStatus' || action === 'updateRegistration') {
     const ref = (data.registrationReferenceNumber || data.registrationRef || '').trim().toUpperCase();
-    const status = data.status;
+    const status = data.status || data.registrationStatus;
     const regs = getStoredRegistrations();
-    const regIndex = regs.findIndex(r => (r.referenceNumber || '').trim().toUpperCase() === ref);
+    const regIndex = regs.findIndex(r =>
+      (r.referenceNumber || r.registrationReferenceNumber || r.id || '').trim().toUpperCase() === ref
+    );
 
     if (regIndex === -1) {
       return { success: false, message: `Registration ${ref} not found.` };
     }
 
     const oldStatus = regs[regIndex].registrationStatus;
-    regs[regIndex].registrationStatus = status;
+    if (status) {
+      regs[regIndex].registrationStatus = status;
+    }
+
+    // Update editable registration fields
+    if (data.fullName || data.name) regs[regIndex].fullName = data.fullName || data.name;
+    if (data.phone || data.phoneNumber) regs[regIndex].phone = data.phone || data.phoneNumber;
+    if (data.email || data.emailAddress) regs[regIndex].email = data.email || data.emailAddress;
+    if (data.selectedPlan || data.planName) regs[regIndex].selectedPlan = data.selectedPlan || data.planName;
+    if (data.registrationFee !== undefined) regs[regIndex].registrationFee = Number(data.registrationFee);
+    if (data.paymentStatus) regs[regIndex].paymentStatus = data.paymentStatus;
+    if (data.gender) regs[regIndex].gender = data.gender;
+    if (data.dob || data.dateOfBirth) regs[regIndex].dob = data.dob || data.dateOfBirth;
+    if (data.address) regs[regIndex].address = data.address;
+    if (data.emergencyContact || data.emergencyContactNumber) regs[regIndex].emergencyContact = data.emergencyContact || data.emergencyContactNumber;
+
     if (status === 'Rejected' && data.rejectionReason) {
       regs[regIndex].rejectionReason = data.rejectionReason;
+    } else if (status === 'Pending Verification') {
+      regs[regIndex].rejectionReason = '';
     }
+
     regs[regIndex].reviewedBy = data.adminName || 'Admin User';
-    regs[regIndex].reviewRemarks = data.adminRemarks || (status === 'Approved' ? 'Verified and approved' : 'Rejected');
+    regs[regIndex].reviewRemarks = data.adminRemarks || (status === 'Approved' ? 'Verified and approved' : status === 'Pending Verification' ? 'Restored to Pending' : 'Rejected');
     saveRegistrations(regs);
 
     logAdminActivity(
       data.adminName || 'Admin User',
-      `Registration ${status}`,
+      `Registration ${status || 'Updated'}`,
       'Registration',
       ref,
       oldStatus,
-      status,
+      status || oldStatus,
       regs[regIndex].reviewRemarks
     );
 
@@ -1218,25 +1240,39 @@ export const apiService = {
   searchMember: (rollNumber: string, phoneLast4: string, token?: string) =>
     callAdminApi('searchMember', { rollNumber: (rollNumber || '').trim().toUpperCase(), phoneLast4: (phoneLast4 || '').trim() }, token),
 
-  // 14. Update Registration Status (Approve/Reject)
+  // 14. Update Registration Status (Approve/Reject/Edit/Restore)
   updateRegistrationStatus: (
     data: {
       registrationReferenceNumber?: string;
       registrationRef?: string;
-      status: 'Approved' | 'Rejected';
+      status?: 'Approved' | 'Rejected' | 'Pending Verification' | string;
       rejectionReason?: string;
       adminRemarks?: string;
       adminName?: string;
+      fullName?: string;
+      phone?: string;
+      email?: string;
+      selectedPlan?: string;
+      registrationFee?: number;
+      paymentStatus?: string;
+      gender?: string;
+      dob?: string;
+      address?: string;
+      emergencyContact?: string;
     },
     token?: string
   ) => {
     const ref = (data.registrationReferenceNumber || data.registrationRef || '').trim().toUpperCase();
-    if (data.status === 'Approved') {
+    if (data.status === 'Approved' && !data.fullName) {
       return apiService.approveRegistration(ref, token, data.adminRemarks || 'Verified and approved', data.adminName);
-    } else {
+    } else if (data.status === 'Rejected' && !data.fullName) {
       return apiService.rejectRegistration(ref, data.rejectionReason || 'Did not meet requirements', token, data.adminRemarks || data.rejectionReason || '', data.adminName);
     }
+    return callAdminApi('updateRegistrationStatus', { ...data, registrationReferenceNumber: ref }, token);
   },
+
+  updateRegistration: (data: any, token?: string) =>
+    callAdminApi('updateRegistrationStatus', data, token),
 
   // 15. Update Fee Status (Approve/Reject)
   updateFeeStatus: (
@@ -1301,13 +1337,70 @@ export const apiService = {
     const localRes = updateMemberInStorage(memberData);
     try {
       const res = await callAdminApi('updateMember', memberData, token);
-      if (res && (res.success || res.status === 'success' || res.status === 'Approved')) {
+      if (res && (res.success || res.status === 'success' || res.status === 'Approved' || res.status === 'ok')) {
+        return {
+          ...localRes,
+          ...res,
+          success: true,
+          message: res.message || localRes.message || 'Member updated successfully.',
+        };
+      }
+      if (res && res.success === false) {
+        if (
+          res.code === 'NETWORK_ERROR' ||
+          res.code === 'HTTP_404' ||
+          res.code === 'PARSE_ERROR' ||
+          (res.message && res.message.includes('Unknown action'))
+        ) {
+          console.warn('[updateMember] GAS backend offline or unconfigured, saved in local storage.');
+          return {
+            ...localRes,
+            success: true,
+            message: localRes.message || 'Member details updated successfully.',
+          };
+        }
         return res;
       }
     } catch (err) {
       console.warn('callAdminApi updateMember failed, using local storage response:', err);
     }
-    return localRes;
+    return {
+      ...localRes,
+      success: true,
+      message: localRes.message || 'Member details updated successfully.',
+    };
+  },
+
+  directAddMember: async (memberData: any, token?: string) => {
+    const localMember = directAddMemberToStorage(memberData);
+    try {
+      const payload = {
+        action: 'directAddMember',
+        ...memberData,
+        rollNumber: localMember.rollNumber,
+        rollNo: localMember.rollNumber,
+        registrationRef: localMember.registrationRef,
+        registrationReferenceNumber: localMember.registrationRef,
+      };
+      const res = await callAdminApi('directAddMember', payload, token);
+      if (res && (res.success || res.status === 'success' || res.status === 'Approved' || res.status === 'ok')) {
+        return {
+          ...res,
+          success: true,
+          data: localMember,
+          member: localMember,
+          message: res.message || 'Member added/restored successfully.',
+        };
+      }
+    } catch (err) {
+      console.warn('callAdminApi directAddMember failed, using local storage result:', err);
+    }
+    return {
+      success: true,
+      data: localMember,
+      member: localMember,
+      message: 'Member added/restored successfully.',
+    };
   },
 
   adminSubmitFeePayment: async (formData: any) => {
