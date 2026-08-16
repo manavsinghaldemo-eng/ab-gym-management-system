@@ -23,7 +23,7 @@ export function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSet
 
   // Add Official Logo Image
   try {
-    doc.addImage(AB_GYM_LOGO_BASE64, 'PNG', 12, 6, 32, 32);
+    doc.addImage(AB_GYM_LOGO_BASE64, 'JPEG', 12, 6, 32, 32);
   } catch (err) {
     console.warn('Could not render logo in PDF:', err);
   }
@@ -223,7 +223,7 @@ export function downloadMemberCardPDF(member: Member, settings: GymSettings) {
 
   // Add Logo to Card
   try {
-    doc.addImage(AB_GYM_LOGO_BASE64, 'PNG', 3, 1, 7, 7);
+    doc.addImage(AB_GYM_LOGO_BASE64, 'JPEG', 3, 1, 7, 7);
   } catch (err) {
     console.warn('Could not render card logo:', err);
   }
