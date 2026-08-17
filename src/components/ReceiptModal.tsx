@@ -2,6 +2,7 @@ import React from 'react';
 import { FeePaymentRecord } from '../types';
 import { getStoredSettings } from '../lib/storage';
 import { downloadFeeReceiptPDF } from '../lib/pdf';
+import { resolveFeePaymentFinancials } from '../lib/paymentUtils';
 import { CheckCircle2, Download, Printer, X, Dumbbell, ShieldCheck } from 'lucide-react';
 import abGymLogo from '../assets/logo';
 
@@ -12,6 +13,7 @@ interface ReceiptModalProps {
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({ record, onClose }) => {
   const settings = getStoredSettings();
+  const financials = resolveFeePaymentFinancials(record);
 
   const handleDownloadPDF = () => {
     downloadFeeReceiptPDF(record, settings);
@@ -121,7 +123,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ record, onClose }) =
               </h3>
               <div className="flex justify-between">
                 <span className="text-zinc-400">Plan Name:</span>
-                <span className="font-semibold text-white">{record.planName}</span>
+                <span className="font-semibold text-white">{financials.planName || record.planName}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-zinc-400">New Membership Expiry:</span>
@@ -131,13 +133,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ record, onClose }) =
                 <span className="text-zinc-400">Payment Status:</span>
                 <span
                   className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded ${
-                    record.status === 'Successful'
+                    financials.isApproved
                       ? 'text-emerald-400 bg-emerald-950/60'
                       : 'text-amber-300 bg-amber-950/60'
                   }`}
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  {record.status}
+                  {financials.status}
                 </span>
               </div>
             </div>
@@ -152,7 +154,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ record, onClose }) =
             <div className="p-4 space-y-2.5 font-mono text-xs">
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Selected Plan:</span>
-                <span className="text-white font-bold">{record.planName || record.selectedPlan || 'N/A'}</span>
+                <span className="text-white font-bold">{financials.planName || record.planName || record.selectedPlan || 'N/A'}</span>
               </div>
               {Number(record.regularPlanAmount || 0) > 0 && (
                 <div className="flex justify-between items-center">
@@ -168,7 +170,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ record, onClose }) =
               )}
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Actual Fee Amount:</span>
-                <span className="text-zinc-200 font-bold">₹{(record.currentFeeAmount ?? 0).toLocaleString('en-IN')}</span>
+                <span className="text-zinc-200 font-bold">₹{financials.currentFeeAmount.toLocaleString('en-IN')}</span>
               </div>
               {record.offerNote && (
                 <div className="flex justify-between items-center bg-zinc-950 p-2 rounded border border-zinc-800">
@@ -178,36 +180,36 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ record, onClose }) =
               )}
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Previous Balance:</span>
-                <span className="text-amber-400">₹{(record.previousBalance ?? 0).toLocaleString('en-IN')}</span>
+                <span className="text-amber-400">₹{financials.previousBalance.toLocaleString('en-IN')}</span>
               </div>
               <div className="flex justify-between items-center font-bold text-white border-t border-zinc-800 pt-2">
                 <span>Total Payable Amount:</span>
-                <span className="text-emerald-400">₹{(record.totalPayableAmount ?? ((record.previousBalance || 0) + (record.currentFeeAmount || 0))).toLocaleString('en-IN')}</span>
+                <span className="text-emerald-400">₹{financials.totalPayableAmount.toLocaleString('en-IN')}</span>
               </div>
               <div className="flex justify-between items-center font-bold text-white">
                 <span>Amount Paid:</span>
-                <span className="text-blue-400 text-sm">₹{(record.amountPaid ?? record.currentFeeAmount ?? 0).toLocaleString('en-IN')}</span>
+                <span className="text-blue-400 text-sm">₹{financials.amountPaid.toLocaleString('en-IN')}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Remaining Balance:</span>
-                <span className={Number(record.remainingBalance || 0) > 0 ? 'text-amber-400 font-bold' : 'text-zinc-300'}>
-                  ₹{(record.remainingBalance ?? 0).toLocaleString('en-IN')}
+                <span className={financials.remainingBalance > 0 ? 'text-amber-400 font-bold' : 'text-zinc-300'}>
+                  ₹{financials.remainingBalance.toLocaleString('en-IN')}
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Payment Type:</span>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                  record.paymentType === 'Partial Payment' || Number(record.remainingBalance || 0) > 0
+                  financials.paymentType === 'Partial Payment' || financials.remainingBalance > 0
                     ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                     : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                 }`}>
-                  {record.paymentType || (Number(record.remainingBalance || 0) > 0 ? 'Partial Payment' : 'Full Payment')}
+                  {financials.paymentType}
                 </span>
               </div>
 
-              {Number(record.remainingBalance || 0) > 0 && (
+              {financials.remainingBalance > 0 && (
                 <div className="p-3 bg-amber-950/40 border border-amber-500/30 rounded-lg text-amber-200 text-xs font-sans font-semibold">
-                  ⚠️ Partial payment received. ₹{record.remainingBalance} is still due.
+                  ⚠️ Partial payment received. ₹{financials.remainingBalance.toLocaleString('en-IN')} is still due.
                 </div>
               )}
 

@@ -1,6 +1,8 @@
 import { jsPDF } from 'jspdf';
+import QRCode from 'qrcode';
 import { FeePaymentRecord, Member, GymSettings } from '../types';
 import { AB_GYM_LOGO_BASE64 } from './logoBase64';
+import { resolveFeePaymentFinancials } from './paymentUtils';
 
 export function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSettings) {
   const doc = new jsPDF({
@@ -8,6 +10,8 @@ export function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSet
     unit: 'mm',
     format: 'a4',
   });
+
+  const fin = resolveFeePaymentFinancials(record);
 
   const blueColor = [37, 99, 235]; // #2563EB
   const darkColor = [20, 20, 25]; // #141419
@@ -32,13 +36,13 @@ export function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSet
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(22);
-  doc.text(settings.gymName, 48, 18);
+  doc.text(settings.gymName || 'AB GYM', 48, 18);
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(settings.tagline, 48, 25);
-  doc.text(`Phone: ${settings.phone} | Email: ${settings.email}`, 48, 31);
-  doc.text(settings.address, 48, 37);
+  doc.text(settings.tagline || 'Stronger Body, Stronger You', 48, 25);
+  doc.text(`Phone: ${settings.phone || '+91 98765 43210'} | Email: ${settings.email || 'abgym@gmail.com'}`, 48, 31);
+  doc.text(settings.address || 'Civil Lines, Near Stadium, Moradabad', 48, 37);
 
   // Receipt Label Right Aligned
   doc.setTextColor(blueColor[0], blueColor[1], blueColor[2]);
@@ -95,7 +99,7 @@ export function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSet
   doc.setFont('helvetica', 'bold');
   doc.text('Selected Plan:', 110, 74);
   doc.setFont('helvetica', 'normal');
-  doc.text(record.planName, 145, 74);
+  doc.text(fin.planName || record.planName || 'Plan', 145, 74);
 
   doc.setFont('helvetica', 'bold');
   doc.text('New Expiry Date:', 110, 82);
@@ -107,7 +111,7 @@ export function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSet
   doc.setFont('helvetica', 'bold');
   doc.text('Payment Status:', 110, 90);
   doc.setFont('helvetica', 'normal');
-  doc.text(record.status, 145, 90);
+  doc.text(fin.status || record.status, 145, 90);
 
   // Financial Breakdown Table
   let y = 115;
@@ -129,21 +133,21 @@ export function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSet
 
   doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Membership Fee Renewal (${record.planName || record.selectedPlan || 'Plan'})`, 20, y + 8);
+  doc.text(`Membership Fee Renewal (${fin.planName || record.planName || record.selectedPlan || 'Plan'})`, 20, y + 8);
   doc.text((record.paymentMethod || 'UPI') + (record.upiTxnId ? ` (${record.upiTxnId})` : ''), 100, y + 8);
   doc.setFont('helvetica', 'bold');
-  const amtPaid = Number(record.amountPaid ?? record.currentFeeAmount ?? 0);
+  const amtPaid = fin.amountPaid;
   doc.text(`₹${amtPaid.toLocaleString('en-IN')}`, 190, y + 8, { align: 'right' });
 
   // Summary Rows
   y += 18;
   doc.setFont('helvetica', 'normal');
   doc.text('Previous Balance:', 130, y);
-  doc.text(`₹${Number(record.previousBalance || 0).toLocaleString('en-IN')}`, 190, y, { align: 'right' });
+  doc.text(`₹${fin.previousBalance.toLocaleString('en-IN')}`, 190, y, { align: 'right' });
 
   y += 6;
   doc.setFont('helvetica', 'normal');
-  const totalPayable = Number(record.totalPayableAmount ?? ((record.previousBalance || 0) + (record.currentFeeAmount || 0)));
+  const totalPayable = fin.totalPayableAmount;
   doc.text('Total Payable Amount:', 130, y);
   doc.text(`₹${totalPayable.toLocaleString('en-IN')}`, 190, y, { align: 'right' });
 
@@ -158,7 +162,7 @@ export function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSet
   doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  const remBal = Number(record.remainingBalance || 0);
+  const remBal = fin.remainingBalance;
   doc.text('Remaining Balance:', 130, y);
   if (remBal > 0) {
     doc.setTextColor(220, 100, 0);
@@ -169,7 +173,7 @@ export function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSet
   doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
   doc.setFont('helvetica', 'normal');
   doc.text('Payment Type:', 130, y);
-  const payType = record.paymentType || (remBal > 0 ? 'Partial Payment' : 'Full Payment');
+  const payType = fin.paymentType;
   doc.text(payType, 190, y, { align: 'right' });
 
   // Notes / Remarks Box
@@ -203,78 +207,393 @@ export function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSet
   doc.save(`ABGYM_Receipt_${record.feeReferenceNumber}.pdf`);
 }
 
-export function downloadMemberCardPDF(member: Member, settings: GymSettings) {
+/**
+ * Generates and downloads a redesigned, ultra-premium AB GYM Official Member ID Card PDF.
+ * Designed to look like a luxury high-tech fitness club identity pass with balanced layout,
+ * dark + emerald/blue fitness aesthetic, QR verification, dynamic status badges, and watermark.
+ */
+export async function downloadMemberCardPDF(member: Member, settings: GymSettings) {
   const doc = new jsPDF({
-    orientation: 'landscape',
+    orientation: 'portrait',
     unit: 'mm',
-    format: [85.6, 53.98], // Standard CR80 ID Card dimensions
+    format: 'a4', // Standard A4 layout with optimized proportions
   });
 
-  const blueColor = [37, 99, 235];
-  const darkBg = [15, 15, 20];
+  const primaryDark = [15, 15, 20]; // #0F0F14
+  const cardBg = [24, 24, 32]; // #181820
+  const emeraldColor = [16, 185, 129]; // #10B981
+  const blueColor = [59, 130, 246]; // #3B82F6
+  const textMuted = [156, 163, 175]; // #9CA3AF
+  const textDark = [229, 231, 235]; // #E5E7EB
 
-  // Background
-  doc.setFillColor(darkBg[0], darkBg[1], darkBg[2]);
-  doc.rect(0, 0, 85.6, 53.98, 'F');
+  // 1. Page Background (Deep Slate)
+  doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+  doc.rect(0, 0, 210, 297, 'F');
 
-  // Blue accent top bar
-  doc.setFillColor(blueColor[0], blueColor[1], blueColor[2]);
-  doc.rect(0, 0, 85.6, 9, 'F');
-
-  // Add Logo to Card
-  try {
-    doc.addImage(AB_GYM_LOGO_BASE64, 'JPEG', 3, 1, 7, 7);
-  } catch (err) {
-    console.warn('Could not render card logo:', err);
+  // Subtle Background Security Lines / Watermark Pattern
+  doc.setDrawColor(30, 30, 42);
+  doc.setLineWidth(0.3);
+  for (let i = 20; i < 280; i += 20) {
+    doc.line(10, i, 200, i);
   }
 
-  // Header Text
+  // Large Subtle Background Watermark
+  doc.setTextColor(25, 25, 36);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(54);
+  doc.text('AB GYM FITNESS', 105, 160, { align: 'center', angle: 45 });
+
+  // Main Card Container (Outer Luxury Frame)
+  doc.setFillColor(cardBg[0], cardBg[1], cardBg[2]);
+  doc.setDrawColor(45, 45, 60);
+  doc.setLineWidth(0.8);
+  doc.roundedRect(12, 14, 186, 268, 6, 6, 'FD');
+
+  // Top Neon Accent Border Line
+  doc.setFillColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
+  doc.rect(12, 14, 186, 3.5, 'F');
+
+  // 2. BRANDED HEADER SECTION
+  let y = 28;
+
+  // Add Official Gym Logo
+  try {
+    doc.addImage(AB_GYM_LOGO_BASE64, 'JPEG', 20, y - 5, 24, 24);
+  } catch (err) {
+    console.warn('Could not render logo in ID Card PDF:', err);
+    doc.setFillColor(37, 99, 235);
+    doc.roundedRect(20, y - 5, 24, 24, 3, 3, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('AB', 32, y + 8, { align: 'center' });
+  }
+
+  // Header Title & Slogan
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.text(settings.gymName, 12, 6);
+  doc.setFontSize(22);
+  doc.text(settings.gymName || 'AB GYM', 48, y + 3);
 
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9.5);
+  doc.setTextColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
+  doc.text(settings.tagline || 'Stronger Body, Stronger You', 48, y + 10);
+
+  // Document Badge on Right
+  doc.setFillColor(35, 35, 48);
+  doc.setDrawColor(60, 60, 80);
+  doc.roundedRect(132, y - 4, 56, 18, 3, 3, 'FD');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text('OFFICIAL MEMBER ID', 160, y + 3, { align: 'center' });
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.text('FITNESS IDENTITY PASS', 160, y + 9, { align: 'center' });
+
+  // Horizontal Accent Divider
+  y = 52;
+  doc.setDrawColor(50, 50, 68);
+  doc.setLineWidth(0.5);
+  doc.line(20, y, 190, y);
+
+  // 3. MEMBER PROFILE & ROLL NUMBER HERO CARD
+  y = 60;
+  doc.setFillColor(18, 18, 26);
+  doc.setDrawColor(55, 55, 75);
+  doc.setLineWidth(0.6);
+  doc.roundedRect(20, y, 170, 48, 4, 4, 'FD');
+
+  // Member Avatar Frame / Photo Box
+  doc.setFillColor(28, 28, 40);
+  doc.setDrawColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
+  doc.setLineWidth(1);
+  doc.roundedRect(26, y + 7, 34, 34, 4, 4, 'FD');
+
+  // Avatar Initials Icon inside Photo Box
+  const nameInitials = (member.fullName || 'Member')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(w => w[0].toUpperCase())
+    .join('');
+
+  doc.setTextColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.text(nameInitials || 'AB', 43, y + 26, { align: 'center' });
   doc.setFontSize(6);
-  doc.setFont('helvetica', 'normal');
-  doc.text('OFFICIAL MEMBER ID PASS', 80, 5.5, { align: 'right' });
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.text('MEMBER PHOTO', 43, y + 34, { align: 'center' });
 
-  // Roll Number Badge
-  doc.setFillColor(230, 230, 230);
-  doc.roundedRect(5, 12, 75.6, 7, 1.5, 1.5, 'F');
-  doc.setTextColor(blueColor[0], blueColor[1], blueColor[2]);
+  // Member Name
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(17);
+  doc.text((member.fullName || 'Member Name').toUpperCase(), 66, y + 15);
+
+  // Prominent Roll Number Display
+  doc.setFillColor(30, 41, 59); // Slate Blue
+  doc.setDrawColor(blueColor[0], blueColor[1], blueColor[2]);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(66, y + 19, 72, 10, 2, 2, 'FD');
+
+  doc.setTextColor(96, 165, 250); // Light blue
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
-  doc.text(`ROLL NO: ${member.rollNumber}`, 42.8, 16.5, { align: 'center' });
-
-  // Member Details
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.text(member.fullName, 5, 24);
-
-  doc.setFontSize(6.5);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(180, 180, 185);
-  doc.text(`Plan: ${member.planName}`, 5, 29);
-  doc.text(`Phone: ${member.phone}`, 5, 33);
-  doc.text(`Joined: ${member.joiningDate}`, 5, 37);
-
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(255, 255, 255);
-  doc.text(`Expiry: ${member.membershipExpiry}`, 5, 42);
+  doc.text(`ROLL NO: ${member.rollNumber || 'ABG-26-0000'}`, 102, y + 25.5, { align: 'center' });
 
   // Status Badge
-  const isExpired = member.status === 'Expired';
-  doc.setFillColor(isExpired ? 220 : 34, isExpired ? 38 : 197, isExpired ? 38 : 94);
-  doc.roundedRect(5, 46, 25, 5, 1, 1, 'F');
+  const statusStr = (member.status || 'Active').toUpperCase();
+  const isActive = statusStr.includes('ACTIVE');
+  const isExpired = statusStr.includes('EXPIRED');
+  const isDue = statusStr.includes('DUE');
+
+  let badgeBg = [16, 185, 129]; // Emerald
+  if (isExpired) badgeBg = [239, 68, 68]; // Red
+  else if (isDue) badgeBg = [245, 158, 11]; // Amber
+
+  doc.setFillColor(badgeBg[0], badgeBg[1], badgeBg[2]);
+  doc.roundedRect(66, y + 32, 44, 7, 1.5, 1.5, 'F');
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(5.5);
-  doc.text(member.status.toUpperCase(), 17.5, 49.5, { align: 'center' });
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.text(`* ${statusStr}`, 88, y + 36.8, { align: 'center' });
 
-  // Emergency contact right side
-  doc.setTextColor(150, 150, 155);
-  doc.setFontSize(5.5);
-  doc.text(`Emergency: ${member.emergencyContact || 'N/A'}`, 80, 49.5, { align: 'right' });
+  // Registration reference indicator
+  if (member.registrationRef) {
+    doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.text(`Ref: ${member.registrationRef}`, 142, y + 37);
+  }
 
-  doc.save(`ABGYM_Card_${member.rollNumber}.pdf`);
+  // 4. MEMBERSHIP DETAILS SECTION
+  y = 116;
+  doc.setFillColor(18, 18, 26);
+  doc.setDrawColor(55, 55, 75);
+  doc.roundedRect(20, y, 170, 38, 4, 4, 'FD');
+
+  // Section Header
+  doc.setFillColor(30, 30, 42);
+  doc.roundedRect(20, y, 170, 8, 4, 4, 'F');
+  doc.rect(20, y + 4, 170, 4, 'F'); // flatten bottom corners
+  doc.setTextColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text('MEMBERSHIP DETAILS', 26, y + 5.5);
+
+  // 4-Column Grid for Membership Details
+  const detailsY = y + 15;
+
+  // Plan Name
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('MEMBERSHIP PLAN', 26, detailsY);
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.text(member.planName || 'Standard Fitness Plan', 26, detailsY + 7);
+
+  // Joining Date
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('JOINED ON', 76, detailsY);
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.text(member.joiningDate || 'N/A', 76, detailsY + 7);
+
+  // Valid Until (Highlighted in Neon Emerald/Amber)
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('VALID UNTIL', 120, detailsY);
+  doc.setTextColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10.5);
+  doc.text(member.membershipExpiry || 'Active', 120, detailsY + 7);
+
+  // Status Summary
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('MEMBERSHIP STATUS', 160, detailsY);
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text(member.status || 'Active', 160, detailsY + 7);
+
+  // 5. PERSONAL & CONTACT INFORMATION
+  y = 162;
+  doc.setFillColor(18, 18, 26);
+  doc.setDrawColor(55, 55, 75);
+  doc.roundedRect(20, y, 170, 44, 4, 4, 'FD');
+
+  // Section Header
+  doc.setFillColor(30, 30, 42);
+  doc.roundedRect(20, y, 170, 8, 4, 4, 'F');
+  doc.rect(20, y + 4, 170, 4, 'F');
+  doc.setTextColor(blueColor[0], blueColor[1], blueColor[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text('PERSONAL INFORMATION & CONTACT', 26, y + 5.5);
+
+  const row1Y = y + 16;
+  const row2Y = y + 28;
+
+  // Phone Number
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('PHONE NUMBER', 26, row1Y);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text(member.phone || 'N/A', 26, row1Y + 5.5);
+
+  // Email Address
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('EMAIL ADDRESS', 80, row1Y);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text(member.email || 'Registered with Gym', 80, row1Y + 5.5);
+
+  // Gender
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('GENDER', 145, row1Y);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text(member.gender || 'Not Specified', 145, row1Y + 5.5);
+
+  // Date of Birth
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('DATE OF BIRTH', 26, row2Y);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text(member.dob || 'On Record', 26, row2Y + 5.5);
+
+  // Emergency Contact
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('EMERGENCY CONTACT', 80, row2Y);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text(member.emergencyContact || 'Available on Request', 80, row2Y + 5.5);
+
+  // Fitness Goal / Medical (if any)
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('FITNESS GOAL', 145, row2Y);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text(member.fitnessGoal || 'General Fitness', 145, row2Y + 5.5);
+
+  // 6. QR CODE & VERIFICATION SECURITY SECTION
+  y = 214;
+  doc.setFillColor(18, 18, 26);
+  doc.setDrawColor(55, 55, 75);
+  doc.roundedRect(20, y, 170, 42, 4, 4, 'FD');
+
+  // Left Verification Notice
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10.5);
+  doc.text('AB GYM OFFICIAL VERIFICATION', 26, y + 10);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.text('Scan the QR code at gym reception or turnstiles to verify active membership', 26, y + 16);
+  doc.text('status, log daily workout attendance, and access fitness locker amenities.', 26, y + 21);
+
+  // Security Pill Badge
+  doc.setFillColor(30, 41, 59);
+  doc.roundedRect(26, y + 26, 75, 8, 2, 2, 'F');
+  doc.setTextColor(96, 165, 250);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.text('* VERIFIED AUTHENTIC MEMBER PASS', 63.5, y + 31.5, { align: 'center' });
+
+  // Generate QR Code Data URL dynamically
+  const qrDataPayload = JSON.stringify({
+    gym: settings.gymName || 'AB GYM',
+    roll: member.rollNumber,
+    name: member.fullName,
+    plan: member.planName,
+    status: member.status,
+    expiry: member.membershipExpiry,
+    ref: member.registrationRef || '',
+  });
+
+  try {
+    const qrDataUrl = await QRCode.toDataURL(qrDataPayload, {
+      margin: 1,
+      width: 200,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF',
+      },
+    });
+
+    // White backing box for QR Code
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(148, y + 4, 34, 34, 3, 3, 'F');
+    doc.addImage(qrDataUrl, 'PNG', 150, y + 6, 30, 30);
+  } catch (qrErr) {
+    console.warn('QR Code generation failed, using styled fallback:', qrErr);
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(148, y + 4, 34, 34, 3, 3, 'F');
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('SCAN QR', 165, y + 22, { align: 'center' });
+  }
+
+  // 7. FOOTER SECTION
+  y = 264;
+  doc.setDrawColor(50, 50, 68);
+  doc.setLineWidth(0.4);
+  doc.line(20, y, 190, y);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.text(
+    `This card confirms official membership at ${settings.gymName || 'AB GYM'} and is non-transferable. Valid only during the active term.`,
+    105,
+    y + 6,
+    { align: 'center' }
+  );
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
+  doc.text(
+    `${settings.address || 'Civil Lines, Moradabad'} | Helpline: ${settings.phone || '+91 98765 43210'}`,
+    105,
+    y + 11,
+    { align: 'center' }
+  );
+
+  // Clean filename format
+  const sanitizedRoll = (member.rollNumber || 'ABG-MEMBER').replace(/[^a-zA-Z0-9_-]/g, '-');
+  doc.save(`AB-GYM-Member-ID-${sanitizedRoll}.pdf`);
 }

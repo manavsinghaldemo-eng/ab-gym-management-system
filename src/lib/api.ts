@@ -5,6 +5,7 @@ import {
   ActivityLogRecord,
   DashboardStats,
 } from '../types';
+import { calculatePaymentStats, parseAmount } from './paymentUtils';
 import {
   getStoredMembers,
   saveMembers,
@@ -198,24 +199,28 @@ async function fallbackAppsScriptBackend<T>(
     const logs = getStoredActivityLogs();
 
     const activeMembers = mems.filter(m => m.status === 'Active').length;
+    const totalMembers = mems.length;
+    const expiredMembers = mems.filter(m => m.status === 'Expired').length;
     const totalRegistrations = regs.length;
     const pendingRegistrations = regs.filter(r => r.registrationStatus === 'Pending Verification' || r.registrationStatus === 'Pending').length;
-    const totalCollections = fees
-      .filter(f => f.paymentStatus === 'Successful' || f.adminVerificationStatus === 'Approved')
-      .reduce((acc, curr) => acc + (Number(curr.amountPaid) || 0), 0);
+    const approvedRegistrations = regs.filter(r => r.registrationStatus === 'Approved').length;
+    const rejectedRegistrations = regs.filter(r => r.registrationStatus === 'Rejected').length;
 
-    const stats: DashboardStats = {
+    const paymentStats = calculatePaymentStats(fees, {
       activeMembers,
+      totalMembers,
+      expiredMembers,
       totalRegistrations,
       pendingRegistrations,
-      totalCollections,
-    };
+      approvedRegistrations,
+      rejectedRegistrations,
+    });
 
     return {
       success: true,
       message: 'Dashboard stats fetched successfully.',
       data: {
-        stats,
+        stats: paymentStats,
         recentRegistrations: regs.slice(0, 5),
         recentFeePayments: fees.slice(0, 5),
         recentActivityLogs: logs.slice(0, 5),
@@ -532,6 +537,132 @@ async function fallbackAppsScriptBackend<T>(
       member: directMember,
       rollNumber: directMember.rollNumber,
     } as any;
+  }
+
+  if (action === 'resendReceipt' || action === 'resendFeeReceipt') {
+    const feeRef = (data.feeReferenceNumber || data.feeRef || '').trim().toUpperCase();
+    const rollNo = (data.rollNumber || data.rollNo || '').trim().toUpperCase();
+    const regRef = (data.registrationReferenceNumber || data.registrationRef || '').trim().toUpperCase();
+    const payments = getStoredPayments();
+    const regs = getStoredRegistrations();
+    const mems = getStoredMembers();
+
+    let matchedPayment = payments.find(p =>
+      (feeRef && (p.feeReferenceNumber || '').toUpperCase() === feeRef) ||
+      (rollNo && (p.rollNumber || '').toUpperCase() === rollNo) ||
+      (regRef && (p.registrationRef || '').toUpperCase() === regRef)
+    );
+
+    let targetEmail = data.email || data.emailAddress || data.memberEmail || (matchedPayment ? (matchedPayment.emailAddress || matchedPayment.email) : '');
+    let memberName = data.memberName || data.fullName || (matchedPayment ? (matchedPayment.memberName || matchedPayment.fullName) : 'Member');
+
+    if (!targetEmail) {
+      const matchMem = mems.find(m =>
+        (rollNo && (m.rollNumber || '').toUpperCase() === rollNo) ||
+        (regRef && (m.registrationRef || '').toUpperCase() === regRef)
+      );
+      if (matchMem && matchMem.email) {
+        targetEmail = matchMem.email;
+        memberName = matchMem.fullName || memberName;
+      }
+    }
+
+    if (!targetEmail) {
+      const matchReg = regs.find(r =>
+        (regRef && (r.registrationRef || r.registrationReferenceNumber || '').toUpperCase() === regRef) ||
+        (rollNo && (r.rollNumber || '').toUpperCase() === rollNo)
+      );
+      if (matchReg && matchReg.email) {
+        targetEmail = matchReg.email;
+        memberName = matchReg.fullName || memberName;
+      }
+    }
+
+    if (!targetEmail) {
+      return {
+        success: false,
+        message: `No registered email address found for ${memberName || rollNo || feeRef}. Please update member email.`,
+      };
+    }
+
+    logAdminActivity(
+      data.adminName || 'Admin User',
+      'Resent Fee Receipt',
+      'Fee Payment',
+      feeRef || rollNo,
+      'Successful',
+      'Successful',
+      `Receipt resent to ${targetEmail}`
+    );
+
+    return {
+      success: true,
+      message: `Verified payment receipt resent successfully to ${targetEmail}.`,
+      data: {
+        feeReferenceNumber: feeRef,
+        email: targetEmail,
+        memberName,
+      } as any,
+    };
+  }
+
+  if (action === 'resendIdCard') {
+    const rollNo = (data.rollNumber || data.rollNo || '').trim().toUpperCase();
+    const regRef = (data.registrationReferenceNumber || data.registrationRef || '').trim().toUpperCase();
+    const mems = getStoredMembers();
+    const regs = getStoredRegistrations();
+
+    let targetEmail = data.email || data.emailAddress || '';
+    let memberName = data.memberName || data.fullName || 'Member';
+
+    if (!targetEmail) {
+      const matchMem = mems.find(m =>
+        (rollNo && (m.rollNumber || '').toUpperCase() === rollNo) ||
+        (regRef && (m.registrationRef || '').toUpperCase() === regRef)
+      );
+      if (matchMem && matchMem.email) {
+        targetEmail = matchMem.email;
+        memberName = matchMem.fullName || memberName;
+      }
+    }
+
+    if (!targetEmail) {
+      const matchReg = regs.find(r =>
+        (regRef && (r.registrationRef || r.registrationReferenceNumber || '').toUpperCase() === regRef) ||
+        (rollNo && (r.rollNumber || '').toUpperCase() === rollNo)
+      );
+      if (matchReg && matchReg.email) {
+        targetEmail = matchReg.email;
+        memberName = matchReg.fullName || memberName;
+      }
+    }
+
+    if (!targetEmail) {
+      return {
+        success: false,
+        message: `No registered email address found for ${memberName || rollNo || regRef}. Please update member email.`,
+      };
+    }
+
+    logAdminActivity(
+      data.adminName || 'Admin User',
+      'Resent Member ID Card',
+      'Member',
+      rollNo || regRef,
+      'Active',
+      'Active',
+      `ID Card resent to ${targetEmail}`
+    );
+
+    return {
+      success: true,
+      message: `Member ID Card successfully resent to ${targetEmail}.`,
+      data: {
+        rollNumber: rollNo,
+        registrationRef: regRef,
+        email: targetEmail,
+      } as any,
+    };
   }
 
   return {
@@ -1338,11 +1469,25 @@ export const apiService = {
       adminName,
     }, token),
 
-  resendIdCard: (rollNumber: string, token?: string) =>
-    callAdminApi('resendIdCard', { rollNumber: (rollNumber || '').trim().toUpperCase() }, token),
+  resendIdCard: (payloadOrRoll: string | Record<string, any>, token?: string) => {
+    const payload = typeof payloadOrRoll === 'string'
+      ? { rollNumber: payloadOrRoll.trim().toUpperCase() }
+      : {
+          ...payloadOrRoll,
+          rollNumber: (payloadOrRoll.rollNumber || payloadOrRoll.rollNo || '').trim().toUpperCase(),
+        };
+    return callAdminApi('resendIdCard', payload, token);
+  },
 
-  resendReceipt: (feeRef: string, token?: string) =>
-    callAdminApi('resendReceipt', { feeReferenceNumber: (feeRef || '').trim().toUpperCase() }, token),
+  resendReceipt: (payloadOrRef: string | Record<string, any>, token?: string) => {
+    const payload = typeof payloadOrRef === 'string'
+      ? { feeReferenceNumber: payloadOrRef.trim().toUpperCase() }
+      : {
+          ...payloadOrRef,
+          feeReferenceNumber: (payloadOrRef.feeReferenceNumber || payloadOrRef.feeRef || '').trim().toUpperCase(),
+        };
+    return callAdminApi('resendReceipt', payload, token);
+  },
 
   updateMember: async (memberData: any, token?: string) => {
     const localRes = updateMemberInStorage(memberData);

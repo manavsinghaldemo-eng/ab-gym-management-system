@@ -1,7 +1,20 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
 import { apiService, getSavedAdminToken, clearAdminSession, ADMIN_STORAGE_KEYS, GOOGLE_APPS_SCRIPT_URL } from '../lib/api';
+import {
+  parseAmount,
+  parseDateToYMD,
+  isDateToday,
+  isDateThisMonth,
+  isPaymentApproved,
+  isPaymentPending,
+  isPaymentRejected,
+  calculatePaymentStats,
+  resolveFeePaymentFinancials,
+  resolveFirstValidAmount,
+  extractPlanPrice,
+} from '../lib/paymentUtils';
 
 import { GOOGLE_APPS_SCRIPT_CODE } from '../lib/googleAppsScriptSource';
 import {
@@ -16,6 +29,8 @@ import {
 import { downloadMemberCardPDF, downloadFeeReceiptPDF } from '../lib/pdf';
 import { MemberCardModal } from '../components/MemberCardModal';
 import { ReceiptModal } from '../components/ReceiptModal';
+import { MemberDetailsModal } from '../components/MemberDetailsModal';
+import { PaymentDetailsModal } from '../components/PaymentDetailsModal';
 import { getStoredSettings, saveSettings, getStoredAttendance, markMemberAttendance, getStoredMembers, getStoredPlans, updateMemberInStorage, directAddMemberToStorage } from '../lib/storage';
 import { AB_FITNESS_UPI_ID } from '../data/initialData';
 import abGymLogo from '../assets/logo';
@@ -60,6 +75,10 @@ import {
   QrCode,
   History,
   ArrowUpDown,
+  TrendingUp,
+  Award,
+  Wallet,
+  Zap,
 } from 'lucide-react';
 
 const getRegistrationReference = (registration: any) =>
@@ -339,13 +358,17 @@ const normalizeFeePayment = (
   const name = resolveFeeMemberName(record, allMembers, allRegs);
   const phone = String(record['Phone Number'] ?? record['phoneNumber'] ?? record['memberPhone'] ?? record['phone'] ?? '');
   const email = String(record['Email Address'] ?? record['emailAddress'] ?? record['memberEmail'] ?? record['email'] ?? '');
-  const plan = String(record['Selected Plan'] ?? record['selectedPlan'] ?? record['planName'] ?? record['membershipPlan'] ?? 'Basic Plan');
-  const status = String(record['Payment Status'] ?? record['paymentStatus'] ?? record['status'] ?? 'Pending Verification');
   const remarks = String(record['Notes'] ?? record['notes'] ?? record['remarks'] ?? record['adminRemarks'] ?? '');
   const upiId = String(record['UPI Transaction ID'] ?? record['upiTransactionId'] ?? record['upiTxnId'] ?? '');
   const upiUrl = String(record['Payment Screenshot'] ?? record['paymentScreenshot'] ?? record['upiScreenshotUrl'] ?? '');
   const ts = String(record['Timestamp'] ?? record['timestamp'] ?? record['createdAt'] ?? new Date().toISOString());
-  const amt = Number(record['Amount Paid'] ?? record['amountPaid'] ?? record['Current Fee Amount'] ?? record['currentFeeAmount'] ?? record['amount'] ?? 0);
+
+  // Authoritative Financial Resolution
+  const financials = resolveFeePaymentFinancials(record);
+
+  // Robust Date Parsing
+  const rawDate = record['Payment Date'] ?? record['paymentDate'] ?? record['Timestamp'] ?? record['timestamp'] ?? record['createdAt'] ?? ts;
+  const cleanPayDate = parseDateToYMD(rawDate) || (typeof rawDate === 'string' && rawDate.includes('T') ? rawDate.split('T')[0] : String(rawDate));
 
   return {
     ...record,
@@ -361,22 +384,22 @@ const normalizeFeePayment = (
     memberPhone: phone,
     emailAddress: email,
     memberEmail: email,
-    selectedPlan: plan,
-    planName: plan,
-    previousBalance: Number(record['Previous Balance'] ?? record['previousBalance'] ?? 0),
-    currentFeeAmount: amt,
-    totalPayableAmount: Number(record['Total Payable Amount'] ?? record['totalPayableAmount'] ?? amt),
-    amountPaid: amt,
-    remainingBalance: Number(record['Remaining Balance'] ?? record['remainingBalance'] ?? 0),
-    paymentType: record['Payment Type'] ?? record['paymentType'] ?? (Number(record['Remaining Balance'] || record['remainingBalance'] || 0) > 0 ? 'Partial Payment' : 'Full Payment'),
-    paymentDate: record['Payment Date'] ?? record['paymentDate'] ?? ts.split('T')[0],
+    selectedPlan: financials.planName,
+    planName: financials.planName,
+    previousBalance: financials.previousBalance,
+    currentFeeAmount: financials.currentFeeAmount,
+    totalPayableAmount: financials.totalPayableAmount,
+    amountPaid: financials.amountPaid,
+    remainingBalance: financials.remainingBalance,
+    paymentType: financials.paymentType,
+    paymentDate: cleanPayDate,
     paymentMethod: record['Payment Method'] ?? record['paymentMethod'] ?? 'UPI',
     upiTransactionId: upiId,
     upiTxnId: upiId,
     paymentScreenshot: upiUrl,
     upiScreenshotUrl: upiUrl,
-    paymentStatus: status,
-    status: status,
+    paymentStatus: financials.status,
+    status: financials.status,
     registrationStatus: record['Registration Status'] ?? record['registrationStatus'] ?? '',
     receiptNumber: record['Receipt Number'] ?? record['receiptNumber'] ?? record['receiptNo'] ?? '',
     pdfReceiptLink: record['PDF Receipt Link'] ?? record['pdfReceiptLink'] ?? record['receiptUrl'] ?? '',
@@ -425,17 +448,8 @@ const getFeeReferenceNumber = (payment: any) =>
     ""
   ).trim().toUpperCase();
 
-const isStatusApproved = (status?: unknown): boolean => {
-  if (!status) return false;
-  const s = String(status).trim().toLowerCase();
-  return s === 'approved' || s === 'successful' || s === 'active' || s === 'verified' || s === 'paid' || s === 'completed';
-};
-
-const isStatusRejected = (status?: unknown): boolean => {
-  if (!status) return false;
-  const s = String(status).trim().toLowerCase();
-  return s === 'rejected' || s === 'failed' || s === 'cancelled' || s === 'inactive';
-};
+const isStatusApproved = (status?: unknown): boolean => isPaymentApproved(status);
+const isStatusRejected = (status?: unknown): boolean => isPaymentRejected(status);
 
 const callBackend = async (payload: Record<string, unknown>) => {
   const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
@@ -594,6 +608,30 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
   };
   const [settings, setSettingsState] = useState<GymSettings>(getStoredSettings());
 
+  // Dynamically calculate and memoize real-time dashboard metrics from live records
+  const computedStats = useMemo(() => {
+    const calculated = calculatePaymentStats(feePayments, {
+      activeMembers: members.filter((m) => isStatusApproved(m.status)).length,
+      totalMembers: members.length,
+      expiredMembers: members.filter((m) => m.status === 'Expired').length,
+      totalRegistrations: registrations.length,
+      pendingRegistrations: registrations.filter((r) => r.status === 'Pending Verification' || (r.status as string) === 'Pending').length,
+      approvedRegistrations: registrations.filter((r) => isStatusApproved(r.status)).length,
+      rejectedRegistrations: registrations.filter((r) => isStatusRejected(r.status)).length,
+      ...(stats || {}),
+    });
+
+    return {
+      ...calculated,
+      todayCollection: calculated.todayCollection,
+      monthlyCollection: calculated.monthlyCollection,
+      totalCollections: calculated.totalCollections,
+      successfulFeePayments: calculated.successfulFeePayments,
+      pendingFeePayments: calculated.pendingFeePayments,
+      rejectedFeePayments: calculated.rejectedFeePayments,
+    };
+  }, [feePayments, members, registrations, stats]);
+
   // Loading & Sync States
   const [isLoading, setIsLoading] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'connected' | 'local'>('connected');
@@ -649,6 +687,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
   const [cardModalMember, setCardModalMember] = useState<Member | null>(null);
   const [receiptModalRecord, setReceiptModalRecord] = useState<FeePaymentRecord | null>(null);
+  const [selectedMemberForDetails, setSelectedMemberForDetails] = useState<Member | null>(null);
+  const [selectedPaymentForDetails, setSelectedPaymentForDetails] = useState<FeePaymentRecord | null>(null);
 
   // Edit Member Modal State
   const [editingMember, setEditingMember] = useState<Member | null>(null);
@@ -3129,109 +3169,148 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
   return (
     <div className="min-h-screen bg-[#050505] text-[#f5f5f4] flex flex-col font-sans">
       {/* Top Admin Navigation Header */}
-      <header className="bg-[#0A0A0D] border-b border-zinc-800/80 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            {/* Title & Sync Indicator */}
-            <div className="flex items-center gap-3">
-              <img
-                src={abGymLogo}
-                alt="AB Gym Official Logo"
-                referrerPolicy="no-referrer"
-                loading="eager"
-                onError={(e) => {
-                  e.currentTarget.style.display = 'none';
-                  const fallbackEl = document.getElementById('admin-hdr-logo-fallback');
-                  if (fallbackEl) fallbackEl.style.display = 'flex';
-                }}
-                className="h-10 w-auto object-contain filter drop-shadow-[0_0_8px_rgba(37,99,235,0.3)]"
-              />
-              <div
-                id="admin-hdr-logo-fallback"
-                style={{ display: 'none' }}
-                className="w-9 h-9 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-500 items-center justify-center"
-              >
-                <ShieldCheck className="w-5 h-5" />
+      <header className="bg-[#0B0C12]/95 backdrop-blur-2xl border-b border-zinc-800/80 sticky top-0 z-40 shadow-2xl transition-all">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          {/* ROW 1: BRAND + ADMIN + SYSTEM ACTIONS */}
+          <div className="flex items-center justify-between py-2 sm:py-2.5 md:py-3 border-b md:border-b-0 border-zinc-800/60 gap-2 sm:gap-3">
+            {/* Left: Gym Logo + Brand + Admin Badge + Live Sync Status */}
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="relative group cursor-pointer shrink-0">
+                <img
+                  src={abGymLogo}
+                  alt="AB Gym Official Logo"
+                  referrerPolicy="no-referrer"
+                  loading="eager"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    const fallbackEl = document.getElementById('admin-hdr-logo-fallback');
+                    if (fallbackEl) fallbackEl.style.display = 'flex';
+                  }}
+                  className="h-8 sm:h-9 md:h-10 w-auto object-contain filter drop-shadow-[0_0_10px_rgba(16,185,129,0.3)] transition-transform group-hover:scale-105"
+                />
+                <div
+                  id="admin-hdr-logo-fallback"
+                  style={{ display: 'none' }}
+                  className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 items-center justify-center font-black font-mono text-xs"
+                >
+                  AB
+                </div>
               </div>
-              <div>
-                <h1 className="text-base font-black text-white uppercase tracking-tight flex items-center gap-2">
-                  AB GYM ADMIN
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-600/20 text-blue-400 font-mono font-normal uppercase">
-                    v2.0
+
+              <div className="flex flex-col min-w-0 justify-center">
+                <div className="flex items-center gap-1.5">
+                  <h1 className="text-xs sm:text-sm md:text-base font-black text-white uppercase tracking-tight font-mono truncate">
+                    AB GYM
+                  </h1>
+                  <span className="px-1.5 py-0.2 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[9px] font-bold font-mono uppercase tracking-wider shrink-0">
+                    ADMIN
                   </span>
-                </h1>
-                <p className="text-[11px] text-zinc-400 flex items-center gap-1.5">
+                </div>
+                
+                <div className="flex items-center gap-1.5 pt-0.5">
                   <span
-                    className={`w-2 h-2 rounded-full ${
-                      syncStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                    className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full shrink-0 ${
+                      syncStatus === 'connected'
+                        ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)] animate-pulse'
+                        : 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]'
                     }`}
                   />
-                  <span>
-                    {syncStatus === 'connected' ? 'Google Sheets Live Sync' : 'Google Sheets Sync Engine'}
+                  <span className="text-[9px] sm:text-[10px] text-zinc-400 font-mono truncate max-w-[140px] sm:max-w-none">
+                    {syncStatus === 'connected' ? 'Google Sheets Live Sync' : 'Connecting Sync...'}
                   </span>
-                </p>
+                </div>
               </div>
             </div>
 
-            {/* Quick Actions */}
-            <div className="flex items-center gap-2 sm:gap-3">
-              <motion.button
-                whileHover={{ scale: 1.04, y: -1 }}
-                whileTap={{ scale: 0.96 }}
-                type="button"
-                onClick={() => handleOpenAddFeeForMember()}
-                className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-900/40 transition-all cursor-pointer"
-                title="Record Member Fee Payment"
-              >
-                <IndianRupee className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">+ Pay Fee</span>
-                <span className="sm:hidden">+ Fee</span>
-              </motion.button>
+            {/* Right: Quick Actions (Desktop md+) & System Controls (Refresh & Logout) */}
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {/* Desktop Only Quick Actions */}
+              <div className="hidden md:flex items-center gap-2">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="button"
+                  onClick={() => handleOpenAddFeeForMember()}
+                  className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md shadow-blue-950/40 border border-blue-400/20 cursor-pointer"
+                  title="Record Member Fee Payment"
+                >
+                  <IndianRupee className="w-3.5 h-3.5" />
+                  <span>Collect Fee</span>
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="button"
+                  onClick={handleOpenDirectAddModal}
+                  className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md shadow-emerald-950/40 border border-emerald-400/20 cursor-pointer"
+                  title="Directly enroll new member or restore past record"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Add Member</span>
+                </motion.button>
+                <div className="h-5 w-px bg-zinc-800 mx-1" />
+              </div>
 
+              {/* Refresh Sync Button */}
               <motion.button
-                whileHover={{ scale: 1.04, y: -1 }}
-                whileTap={{ scale: 0.96 }}
-                type="button"
-                onClick={handleOpenDirectAddModal}
-                className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer"
-                title="Directly enroll new member or restore past record"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">+ Direct Add / Restore Member</span>
-                <span className="sm:hidden">+ Add Member</span>
-              </motion.button>
-
-              <motion.button
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.96 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
                 onClick={loadLiveData}
                 disabled={isLoading}
-                className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                title="Refresh Live Data"
+                className="p-1.5 sm:p-2 md:px-2.5 md:py-1.5 bg-[#14151D] hover:bg-[#1C1E2A] text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                title="Refresh Live Data from Google Sheets"
+                aria-label="Refresh Data"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">Refresh Data</span>
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-emerald-400' : 'text-zinc-400'}`} />
+                <span className="hidden xl:inline text-[11px]">Sync</span>
               </motion.button>
 
+              {/* Logout Button */}
               <motion.button
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.96 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
                 onClick={handleLogout}
-                className="px-3 py-1.5 bg-red-950/40 border border-red-600/30 hover:bg-red-900/40 text-red-400 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="p-1.5 sm:p-2 md:px-2.5 md:py-1.5 bg-red-950/30 border border-red-500/30 hover:bg-red-900/40 text-red-400 hover:text-red-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Sign out of Admin Session"
+                aria-label="Sign Out"
               >
                 <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Sign Out</span>
+                <span className="hidden lg:inline text-[11px]">Logout</span>
               </motion.button>
             </div>
           </div>
 
+          {/* ROW 2: QUICK ACTIONS (Mobile & Tablet < md) */}
+          <div className="md:hidden grid grid-cols-2 gap-2 py-2 border-b border-zinc-800/60">
+            <motion.button
+              whileTap={{ scale: 0.98 }}
+              type="button"
+              onClick={() => handleOpenAddFeeForMember()}
+              className="w-full py-2 px-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md shadow-blue-950/40 border border-blue-400/20 active:scale-95 transition-all cursor-pointer"
+            >
+              <IndianRupee className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">Collect Fee</span>
+            </motion.button>
+
+            <motion.button
+              whileTap={{ scale: 0.98 }}
+              type="button"
+              onClick={handleOpenDirectAddModal}
+              className="w-full py-2 px-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/40 border border-emerald-400/20 active:scale-95 transition-all cursor-pointer"
+            >
+              <UserPlus className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">Add Member</span>
+            </motion.button>
+          </div>
+
+          {/* System Error & Sync Notices */}
           <AnimatePresence>
             {error && (
               <motion.div
                 initial={{ opacity: 0, height: 0, y: -10 }}
                 animate={{ opacity: 1, height: 'auto', y: 0 }}
                 exit={{ opacity: 0, height: 0, y: -10 }}
-                className="bg-red-950/80 border border-red-500 text-red-200 px-4 py-3 rounded-2xl my-2 flex items-center justify-between font-sans text-sm overflow-hidden"
+                className="bg-red-950/80 border border-red-500 text-red-200 px-4 py-3 rounded-2xl my-2 flex items-center justify-between font-sans text-sm overflow-hidden shadow-lg"
               >
                 <div className="flex items-center gap-3">
                   <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
@@ -3248,7 +3327,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 initial={{ opacity: 0, height: 0, y: -10 }}
                 animate={{ opacity: 1, height: 'auto', y: 0 }}
                 exit={{ opacity: 0, height: 0, y: -10 }}
-                className="bg-red-950/40 border border-red-500/40 rounded-2xl p-4 my-2 flex items-start gap-3.5 overflow-hidden"
+                className="bg-red-950/40 border border-red-500/40 rounded-2xl p-4 my-2 flex items-start gap-3.5 overflow-hidden shadow-lg"
               >
                 <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
                 <div>
@@ -3264,15 +3343,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
             )}
           </AnimatePresence>
 
-          {/* Sub Navigation Tabs */}
-          <nav className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none border-t border-zinc-800/40 pt-1">
+          {/* ROW 3: NAVIGATION TABS (Horizontal Scrollable, Single Line, No Wrapping) */}
+          <nav className="flex items-center gap-1.5 overflow-x-auto py-1.5 sm:py-2 scrollbar-none border-t md:border-t border-zinc-800/60">
             {[
               { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/admin/dashboard' },
-              { id: 'registrations', label: 'Registrations', icon: UserCheck, count: registrations.filter(r => r.status === 'Pending Verification' || (r.status as string) === 'Pending').length, path: '/admin/registrations' },
-              { id: 'members', label: 'Members', icon: Users, count: members.length, path: '/admin/members' },
-              { id: 'fee-records', label: 'Fee Payments', icon: CreditCard, count: feePayments.filter(f => f.status === 'Pending Verification').length, path: '/admin/fee-records' },
-              { id: 'payment-history', label: 'Payment History', icon: History, count: feePayments.length, path: '/admin/payment-history' },
-              { id: 'attendance', label: 'QR Attendance', icon: QrCode, count: attendanceRecords.filter(a => a.date === new Date().toISOString().split('T')[0]).length, path: '/admin/attendance' },
+              { id: 'registrations', label: 'Registrations', icon: UserCheck, count: registrations.filter(r => r.status === 'Pending Verification' || (r.status as string) === 'Pending').length, countColor: 'bg-amber-500/20 text-amber-400 border-amber-500/40', path: '/admin/registrations' },
+              { id: 'members', label: 'Members', icon: Users, count: members.length, countColor: 'bg-zinc-800 text-zinc-300 border-zinc-700', path: '/admin/members' },
+              { id: 'fee-records', label: 'Fee Payments', icon: CreditCard, count: feePayments.filter(f => f.status === 'Pending Verification').length, countColor: 'bg-amber-500/20 text-amber-400 border-amber-500/40', path: '/admin/fee-records' },
+              { id: 'payment-history', label: 'Payment Ledger', icon: History, count: feePayments.length, countColor: 'bg-zinc-800 text-zinc-300 border-zinc-700', path: '/admin/payment-history' },
+              { id: 'attendance', label: 'QR Attendance', icon: QrCode, count: attendanceRecords.filter(a => a.date === new Date().toISOString().split('T')[0]).length, countColor: 'bg-blue-500/20 text-blue-400 border-blue-500/40', path: '/admin/attendance' },
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -3282,29 +3361,29 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   whileHover={{ y: -1 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => handleTabChange(tab.id)}
-                  className={`relative px-3.5 py-2.5 rounded-t-lg font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-colors whitespace-nowrap cursor-pointer z-10 ${
+                  className={`relative px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl font-bold text-[11px] sm:text-xs uppercase tracking-wider flex items-center gap-1.5 sm:gap-2 transition-all whitespace-nowrap shrink-0 cursor-pointer z-10 ${
                     isActive
                       ? 'text-white'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/30'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40'
                   }`}
                 >
                   {isActive && (
                     <motion.div
                       layoutId="activeAdminTabIndicator"
-                      className="absolute inset-0 bg-zinc-800/80 rounded-t-lg border-b-2 border-red-500 z-[-1]"
+                      className="absolute inset-0 bg-gradient-to-r from-emerald-950/60 to-teal-950/60 border border-emerald-500/40 rounded-xl shadow-[0_0_15px_rgba(16,185,129,0.15)] z-[-1]"
                       transition={{ type: 'spring', stiffness: 450, damping: 35 }}
                     />
                   )}
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-red-500' : 'text-zinc-400'}`} />
+                  <Icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${isActive ? 'text-emerald-400' : 'text-zinc-400'}`} />
                   <span>{tab.label}</span>
                   {tab.count !== undefined && tab.count > 0 && (
-                    <motion.span
-                      initial={{ scale: 0.8 }}
-                      animate={{ scale: 1 }}
-                      className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-red-600 text-white font-bold shadow-sm shadow-red-600/50"
+                    <span
+                      className={`px-1.5 sm:px-2 py-0.2 rounded-full text-[9px] sm:text-[10px] font-mono font-bold border ${
+                        tab.countColor || 'bg-zinc-800 text-zinc-300 border-zinc-700'
+                      }`}
                     >
                       {tab.count}
-                    </motion.span>
+                    </span>
                   )}
                 </motion.button>
               );
@@ -3326,145 +3405,220 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
               className="space-y-8"
             >
-              {/* KPI Cards Grid */}
-              <div className="space-y-3">
-                <h2 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
-                  <LayoutDashboard className="w-4 h-4 text-red-500" />
-                  Live Key Performance Metrics
-                </h2>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {/* 1. Registrations */}
-                  <motion.div
-                    whileHover={{ y: -3, scale: 1.02 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="p-4 bg-[#0F0F12] border border-zinc-800/80 hover:border-zinc-700 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
-                  >
-                    <span className="text-[11px] font-bold text-zinc-400 uppercase">Total Registrations</span>
-                    <div className="text-2xl font-black text-white font-mono">{stats?.totalRegistrations ?? registrations.length}</div>
-                  </motion.div>
-
-                  <motion.div
-                    whileHover={{ y: -3, scale: 1.02 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="p-4 bg-[#0F0F12] border border-amber-500/20 hover:border-amber-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
-                  >
-                    <span className="text-[11px] font-bold text-amber-400 uppercase">Pending Regs</span>
-                    <div className="text-2xl font-black text-amber-400 font-mono">
-                      {stats?.pendingRegistrations ?? registrations.filter(r => r.status === 'Pending Verification' || (r.status as string) === 'Pending').length}
+              {/* Executive Summary Hero Banner */}
+              <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#0F1016] via-[#141420] to-[#0D1117] border border-zinc-800/80 p-6 sm:p-8 shadow-2xl">
+                <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+                <div className="absolute bottom-0 left-1/3 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+                
+                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold font-mono uppercase tracking-wide flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        Executive Dashboard
+                      </span>
+                      <span className="text-zinc-500 text-xs font-mono">•</span>
+                      <span className="text-zinc-400 text-xs font-mono">Live Sync Engine Active</span>
                     </div>
-                  </motion.div>
+                    <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight font-sans">
+                      Gym Operations & Revenue Overview
+                    </h2>
+                    <p className="text-xs sm:text-sm text-zinc-400 max-w-2xl leading-relaxed">
+                      Real-time member admissions, fee verifications, attendance tracking, and financial analytics directly connected with your Google Sheets.
+                    </p>
+                  </div>
 
-                  <motion.div
-                    whileHover={{ y: -3, scale: 1.02 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="p-4 bg-[#0F0F12] border border-emerald-500/20 hover:border-emerald-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
-                  >
-                    <span className="text-[11px] font-bold text-emerald-400 uppercase">Approved Regs</span>
-                    <div className="text-2xl font-black text-emerald-400 font-mono">
-                      {stats?.approvedRegistrations ?? registrations.filter(r => isStatusApproved(r.status)).length}
-                    </div>
-                  </motion.div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <motion.button
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => handleOpenAddFeeForMember()}
+                      className="px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-blue-900/40 cursor-pointer"
+                    >
+                      <IndianRupee className="w-4 h-4" />
+                      <span>Collect Fee</span>
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={handleOpenDirectAddModal}
+                      className="px-4 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-emerald-900/40 cursor-pointer"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>Add Member</span>
+                    </motion.button>
+                  </div>
+                </div>
+              </div>
 
-                  <motion.div
-                    whileHover={{ y: -3, scale: 1.02 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="p-4 bg-[#0F0F12] border border-red-500/20 hover:border-red-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
-                  >
-                    <span className="text-[11px] font-bold text-red-400 uppercase">Rejected Regs</span>
-                    <div className="text-2xl font-black text-red-400 font-mono">
-                      {stats?.rejectedRegistrations ?? registrations.filter(r => isStatusRejected(r.status)).length}
-                    </div>
-                  </motion.div>
+              {/* Primary Metric Categories */}
+              <div className="space-y-6">
+                {/* 1. Revenue & Financial Health */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-black text-zinc-400 uppercase tracking-wider font-mono flex items-center gap-2">
+                      <Wallet className="w-4 h-4 text-emerald-400" />
+                      <span>Financial Performance & Collections</span>
+                    </h3>
+                  </div>
 
-                  {/* 2. Members */}
-                  <motion.div
-                    whileHover={{ y: -3, scale: 1.02 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="p-4 bg-[#0F0F12] border border-zinc-800/80 hover:border-zinc-700 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
-                  >
-                    <span className="text-[11px] font-bold text-zinc-400 uppercase">Total Members</span>
-                    <div className="text-2xl font-black text-white font-mono">{stats?.totalMembers ?? members.length}</div>
-                  </motion.div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* Today's Collection */}
+                    <motion.div
+                      whileHover={{ y: -3 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                      className="relative overflow-hidden p-5 bg-gradient-to-br from-[#0F1512] to-[#121E18] border border-emerald-500/30 hover:border-emerald-500/60 rounded-3xl space-y-2 shadow-lg group transition-all"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-emerald-400 uppercase tracking-wider font-mono">Today's Collection</span>
+                        <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                          <TrendingUp className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="text-2xl sm:text-3xl font-black text-emerald-300 font-mono">
+                        ₹{(computedStats.todayCollection ?? 0).toLocaleString()}
+                      </div>
+                      <p className="text-[10px] text-zinc-400 font-sans">Verified receipts received today</p>
+                    </motion.div>
 
-                  <motion.div
-                    whileHover={{ y: -3, scale: 1.02 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="p-4 bg-[#0F0F12] border border-emerald-500/20 hover:border-emerald-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
-                  >
-                    <span className="text-[11px] font-bold text-emerald-400 uppercase">Active Members</span>
-                    <div className="text-2xl font-black text-emerald-400 font-mono">
-                      {stats?.activeMembers ?? members.filter(m => isStatusApproved(m.status)).length}
-                    </div>
-                  </motion.div>
+                    {/* Monthly Collection */}
+                    <motion.div
+                      whileHover={{ y: -3 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                      className="relative overflow-hidden p-5 bg-gradient-to-br from-[#0F121C] to-[#12162A] border border-blue-500/30 hover:border-blue-500/60 rounded-3xl space-y-2 shadow-lg group transition-all"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-blue-400 uppercase tracking-wider font-mono">Monthly Collection</span>
+                        <div className="w-8 h-8 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                          <Award className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="text-2xl sm:text-3xl font-black text-blue-300 font-mono">
+                        ₹{(computedStats.monthlyCollection ?? 0).toLocaleString()}
+                      </div>
+                      <p className="text-[10px] text-zinc-400 font-sans">Total verified revenue this month</p>
+                    </motion.div>
 
-                  <motion.div
-                    whileHover={{ y: -3, scale: 1.02 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="p-4 bg-[#0F0F12] border border-zinc-700/60 hover:border-zinc-600 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
-                  >
-                    <span className="text-[11px] font-bold text-zinc-400 uppercase">Expired Members</span>
-                    <div className="text-2xl font-black text-zinc-400 font-mono">
-                      {stats?.expiredMembers ?? members.filter(m => m.status === 'Expired').length}
-                    </div>
-                  </motion.div>
+                    {/* Successful Fee Transactions */}
+                    <motion.div
+                      whileHover={{ y: -3 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                      className="p-5 bg-[#0F0F14] border border-zinc-800 hover:border-zinc-700 rounded-3xl space-y-2 shadow-lg transition-all"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider font-mono">Verified Payments</span>
+                        <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                          <CheckCircle2 className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="text-2xl sm:text-3xl font-black text-white font-mono">
+                        {computedStats.successfulFeePayments ?? 0}
+                      </div>
+                      <p className="text-[10px] text-emerald-400/80 font-sans">Approved fee receipts on record</p>
+                    </motion.div>
 
-                  {/* 3. Fee Payments */}
-                  <motion.div
-                    whileHover={{ y: -3, scale: 1.02 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="p-4 bg-[#0F0F12] border border-amber-500/20 hover:border-amber-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
-                  >
-                    <span className="text-[11px] font-bold text-amber-400 uppercase">Pending Fee Payments</span>
-                    <div className="text-2xl font-black text-amber-400 font-mono">
-                      {stats?.pendingFeePayments ?? feePayments.filter(f => !isStatusApproved(f.status) && !isStatusRejected(f.status)).length}
-                    </div>
-                  </motion.div>
+                    {/* Pending Fee Submissions */}
+                    <motion.div
+                      whileHover={{ y: -3 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                      className="p-5 bg-[#0F0F14] border border-amber-500/30 hover:border-amber-500/60 rounded-3xl space-y-2 shadow-lg transition-all"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider font-mono">Pending Verification</span>
+                        <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="text-2xl sm:text-3xl font-black text-amber-400 font-mono">
+                        {computedStats.pendingFeePayments ?? 0}
+                      </div>
+                      <p className="text-[10px] text-amber-300/80 font-sans">Awaiting staff verification</p>
+                    </motion.div>
+                  </div>
+                </div>
 
-                  <motion.div
-                    whileHover={{ y: -3, scale: 1.02 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="p-4 bg-[#0F0F12] border border-emerald-500/20 hover:border-emerald-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
-                  >
-                    <span className="text-[11px] font-bold text-emerald-400 uppercase">Successful Fees</span>
-                    <div className="text-2xl font-black text-emerald-400 font-mono">
-                      {stats?.successfulFeePayments ?? feePayments.filter(f => isStatusApproved(f.status)).length}
-                    </div>
-                  </motion.div>
+                {/* 2. Membership & Admissions */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-black text-zinc-400 uppercase tracking-wider font-mono flex items-center gap-2">
+                      <Users className="w-4 h-4 text-blue-400" />
+                      <span>Membership & Admissions Pipeline</span>
+                    </h3>
+                  </div>
 
-                  <motion.div
-                    whileHover={{ y: -3, scale: 1.02 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="p-4 bg-[#0F0F12] border border-red-500/20 hover:border-red-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
-                  >
-                    <span className="text-[11px] font-bold text-red-400 uppercase">Rejected Fees</span>
-                    <div className="text-2xl font-black text-red-400 font-mono">
-                      {stats?.rejectedFeePayments ?? feePayments.filter(f => isStatusRejected(f.status)).length}
-                    </div>
-                  </motion.div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+                    {/* Active Members */}
+                    <motion.div
+                      whileHover={{ y: -2 }}
+                      className="p-4 bg-[#0F0F14] border border-emerald-500/30 rounded-2xl space-y-1 shadow-md hover:border-emerald-500/60 transition-all"
+                    >
+                      <span className="text-[10px] font-black text-emerald-400 uppercase font-mono">Active Members</span>
+                      <div className="text-2xl font-black text-emerald-300 font-mono">
+                        {computedStats.activeMembers ?? 0}
+                      </div>
+                      <p className="text-[9px] text-zinc-500">With valid plan</p>
+                    </motion.div>
 
-                  {/* 4. Revenue */}
-                  <motion.div
-                    whileHover={{ y: -3, scale: 1.02 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="p-4 bg-gradient-to-br from-emerald-950/40 to-emerald-900/20 border border-emerald-500/30 hover:border-emerald-500/60 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
-                  >
-                    <span className="text-[11px] font-bold text-emerald-300 uppercase">Today's Collection</span>
-                    <div className="text-2xl font-black text-emerald-300 font-mono">
-                      ₹{(stats?.todayCollection ?? 0).toLocaleString()}
-                    </div>
-                  </motion.div>
+                    {/* Total Members */}
+                    <motion.div
+                      whileHover={{ y: -2 }}
+                      className="p-4 bg-[#0F0F14] border border-zinc-800 rounded-2xl space-y-1 shadow-md hover:border-zinc-700 transition-all"
+                    >
+                      <span className="text-[10px] font-black text-zinc-400 uppercase font-mono">Total Members</span>
+                      <div className="text-2xl font-black text-white font-mono">
+                        {computedStats.totalMembers ?? 0}
+                      </div>
+                      <p className="text-[9px] text-zinc-500">Enrolled roster</p>
+                    </motion.div>
 
-                  <motion.div
-                    whileHover={{ y: -3, scale: 1.02 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="p-4 bg-gradient-to-br from-blue-950/40 to-blue-900/20 border border-blue-500/30 hover:border-blue-500/60 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
-                  >
-                    <span className="text-[11px] font-bold text-blue-300 uppercase">Monthly Collection</span>
-                    <div className="text-2xl font-black text-blue-300 font-mono">
-                      ₹{(stats?.monthlyCollection ?? feePayments.filter(f => isStatusApproved(f.status)).reduce((a, b) => a + (Number(b.amountPaid) || 0), 0)).toLocaleString()}
-                    </div>
-                  </motion.div>
+                    {/* Expired Members */}
+                    <motion.div
+                      whileHover={{ y: -2 }}
+                      className="p-4 bg-[#0F0F14] border border-zinc-800 rounded-2xl space-y-1 shadow-md hover:border-zinc-700 transition-all"
+                    >
+                      <span className="text-[10px] font-black text-zinc-400 uppercase font-mono">Expired Members</span>
+                      <div className="text-2xl font-black text-zinc-400 font-mono">
+                        {computedStats.expiredMembers ?? 0}
+                      </div>
+                      <p className="text-[9px] text-zinc-500">Renewal due</p>
+                    </motion.div>
+
+                    {/* Total Registrations */}
+                    <motion.div
+                      whileHover={{ y: -2 }}
+                      className="p-4 bg-[#0F0F14] border border-zinc-800 rounded-2xl space-y-1 shadow-md hover:border-zinc-700 transition-all"
+                    >
+                      <span className="text-[10px] font-black text-zinc-400 uppercase font-mono">Total Regs</span>
+                      <div className="text-2xl font-black text-white font-mono">
+                        {computedStats.totalRegistrations ?? 0}
+                      </div>
+                      <p className="text-[9px] text-zinc-500">All submissions</p>
+                    </motion.div>
+
+                    {/* Pending Regs */}
+                    <motion.div
+                      whileHover={{ y: -2 }}
+                      className="p-4 bg-[#0F0F14] border border-amber-500/30 rounded-2xl space-y-1 shadow-md hover:border-amber-500/60 transition-all"
+                    >
+                      <span className="text-[10px] font-black text-amber-400 uppercase font-mono">Pending Regs</span>
+                      <div className="text-2xl font-black text-amber-400 font-mono">
+                        {computedStats.pendingRegistrations ?? 0}
+                      </div>
+                      <p className="text-[9px] text-zinc-500">Awaiting approval</p>
+                    </motion.div>
+
+                    {/* Today Attendance */}
+                    <motion.div
+                      whileHover={{ y: -2 }}
+                      className="p-4 bg-[#0F0F14] border border-blue-500/30 rounded-2xl space-y-1 shadow-md hover:border-blue-500/60 transition-all"
+                    >
+                      <span className="text-[10px] font-black text-blue-400 uppercase font-mono">Today Check-Ins</span>
+                      <div className="text-2xl font-black text-blue-300 font-mono">
+                        {attendanceRecords.filter(a => a.date === new Date().toISOString().split('T')[0]).length}
+                      </div>
+                      <p className="text-[9px] text-zinc-500">QR / Reception</p>
+                    </motion.div>
+                  </div>
                 </div>
               </div>
 
@@ -4052,12 +4206,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   </thead>
                   <tbody className="divide-y divide-zinc-800/60 text-zinc-300 font-mono">
                     {filteredMembers.map((m) => (
-                      <tr key={m.id || m.rollNumber} className="hover:bg-zinc-800/30 transition-colors">
-                        <td className="py-3.5 px-4 font-bold text-blue-400 whitespace-nowrap">
+                      <tr
+                        key={m.id || m.rollNumber}
+                        onClick={() => setSelectedMemberForDetails(m)}
+                        className="hover:bg-zinc-800/40 transition-colors cursor-pointer group"
+                      >
+                        <td className="py-3.5 px-4 font-bold text-blue-400 group-hover:text-blue-300 whitespace-nowrap">
                           {m.rollNumber}
                         </td>
                         <td className="py-3.5 px-4 font-sans">
-                          <div className="font-bold text-white text-sm">{m.fullName}</div>
+                          <div className="font-bold text-white text-sm group-hover:text-emerald-400 transition-colors">{m.fullName}</div>
                           <div className="text-xs text-zinc-400 font-mono">{m.phone} | {m.email}</div>
                         </td>
                         <td className="py-3.5 px-4 font-sans">
@@ -4077,7 +4235,20 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                           </span>
                         </td>
                         <td className="py-3.5 px-4 text-right">
-                          <div className="flex items-center justify-end gap-2 font-sans">
+                          <div className="flex items-center justify-end gap-2 font-sans flex-wrap">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedMemberForDetails(m);
+                              }}
+                              className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 group-hover:text-white rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer"
+                              title="View Member Full Profile & Payment History"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-purple-400" />
+                              <span>View Details</span>
+                            </button>
+
                             <button
                               type="button"
                               onClick={(e) => {
@@ -4105,7 +4276,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                             </button>
 
                             <button
-                              onClick={() => setCardModalMember(m)}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCardModalMember(m);
+                              }}
                               className="px-2.5 py-1.5 bg-blue-950/60 border border-blue-500/30 hover:bg-blue-900/60 text-blue-400 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer"
                             >
                               <Download className="w-3.5 h-3.5" />
@@ -4113,7 +4288,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                             </button>
 
                             <button
-                              onClick={() => handleResendIdCard(m)}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleResendIdCard(m);
+                              }}
                               disabled={processingId === `resend-id-${m.rollNumber}`}
                               className="px-2.5 py-1.5 bg-amber-950/60 border border-amber-500/30 hover:bg-amber-900/60 text-amber-400 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
                             >
@@ -4274,8 +4453,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                         const statusVal = fee.paymentStatus || fee.status;
 
                         return (
-                          <tr key={fee.id || feeRef} className="hover:bg-zinc-800/30 transition-colors">
-                            <td className="py-3.5 px-4 font-bold text-emerald-400 whitespace-nowrap">
+                          <tr
+                            key={fee.id || feeRef}
+                            onClick={() => setSelectedPaymentForDetails(fee)}
+                            className="hover:bg-zinc-800/40 transition-colors cursor-pointer group"
+                          >
+                            <td className="py-3.5 px-4 font-bold text-emerald-400 group-hover:text-emerald-300 whitespace-nowrap">
                               {feeRef}
                               <div className="text-[10px] text-zinc-500 font-normal">{fee.paymentDate || fee.timestamp}</div>
                             </td>
@@ -4283,14 +4466,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                               <div className="font-bold text-blue-400 font-mono">{regRef || '-'}</div>
                               {rollNo && (
                                 <div className="mt-0.5">
-                                  <span className="px-2 py-0.5 rounded bg-blue-950/60 text-blue-300 border border-blue-500/30 text-[10px] font-mono font-bold">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const found = members.find(m => (m.rollNumber || (m as any).rollNo || '').trim().toUpperCase() === rollNo.trim().toUpperCase());
+                                      if (found) setSelectedMemberForDetails(found);
+                                    }}
+                                    className="px-2 py-0.5 rounded bg-blue-950/60 text-blue-300 border border-blue-500/30 text-[10px] font-mono font-bold hover:bg-blue-900/60 cursor-pointer"
+                                    title="View Member Profile"
+                                  >
                                     {rollNo}
-                                  </span>
+                                  </button>
                                 </div>
                               )}
                             </td>
                             <td className="py-3.5 px-4 font-sans">
-                              <div className="font-bold text-white text-sm">{memberName}</div>
+                              <div className="font-bold text-white text-sm group-hover:text-emerald-400 transition-colors">{memberName}</div>
                               <div className="text-xs text-zinc-400 font-mono">
                                 {phone}{email ? ` | ${email}` : ''}
                               </div>
@@ -4326,6 +4518,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                                   href={screenshot}
                                   target="_blank"
                                   rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
                                   className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-blue-400 hover:text-blue-300 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer"
                                 >
                                   <ExternalLink className="w-3.5 h-3.5" />
@@ -4353,11 +4546,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                               </motion.span>
                             </td>
                             <td className="py-3.5 px-4 text-right">
-                              <div className="flex items-center justify-end gap-2 font-sans">
+                              <div className="flex items-center justify-end gap-2 font-sans flex-wrap">
                                 <button
-                                  onClick={() => setReceiptModalRecord(fee)}
-                                  className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-                                  title="View Details & Receipt"
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedPaymentForDetails(fee);
+                                  }}
+                                  className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 group-hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                                  title="View Fee Payment Details & Breakdown"
                                 >
                                   <Eye className="w-3.5 h-3.5 text-blue-400" />
                                   <span>View Details</span>
@@ -4368,7 +4565,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                                     whileHover={{ scale: 1.05 }}
                                     whileTap={{ scale: 0.95 }}
                                     type="button"
-                                    onClick={() => handleApproveFeePayment(payment)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleApproveFeePayment(payment);
+                                    }}
                                     disabled={
                                       processingId === getFeeReferenceNumber(payment)
                                     }
@@ -4392,7 +4592,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                                   <motion.button
                                     whileHover={{ scale: 1.05 }}
                                     whileTap={{ scale: 0.95 }}
-                                    onClick={() => handleResendReceipt(fee)}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleResendReceipt(fee);
+                                    }}
                                     disabled={processingId === `resend-receipt-${feeRef}`}
                                     className="px-2.5 py-1.5 bg-blue-950/60 border border-blue-500/30 hover:bg-blue-900/60 text-blue-400 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
                                     title="Resend Verified Receipt"
@@ -4411,7 +4615,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                                     whileHover={{ scale: 1.05 }}
                                     whileTap={{ scale: 0.95 }}
                                     type="button"
-                                    onClick={() => setRejectFeeModal(payment)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setRejectFeeModal(payment);
+                                    }}
                                     disabled={
                                       processingId === getFeeReferenceNumber(payment)
                                     }
@@ -4628,10 +4835,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                         const screenshotUrl = record.paymentScreenshotUrl || record.upiScreenshotUrl || record.paymentScreenshot;
 
                         return (
-                          <tr key={record.id || feeRef} className="hover:bg-zinc-800/30 transition-colors">
+                          <tr
+                            key={record.id || feeRef}
+                            onClick={() => setSelectedPaymentForDetails(record)}
+                            className="hover:bg-zinc-800/40 transition-colors cursor-pointer group"
+                          >
                             {/* Fee Ref & Receipt */}
                             <td className="py-3.5 px-4">
-                              <div className="font-bold text-emerald-400">{feeRef}</div>
+                              <div className="font-bold text-emerald-400 group-hover:text-emerald-300">{feeRef}</div>
                               {record.receiptNumber && (
                                 <div className="text-[10px] text-zinc-400 mt-0.5">
                                   Receipt #: <span className="text-zinc-200">{record.receiptNumber}</span>
@@ -4641,12 +4852,21 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
                             {/* Member Info */}
                             <td className="py-3.5 px-4 font-sans">
-                              <div className="font-bold text-white text-sm">{name}</div>
+                              <div className="font-bold text-white text-sm group-hover:text-emerald-400 transition-colors">{name}</div>
                               <div className="flex flex-wrap items-center gap-1.5 mt-1 font-mono text-[11px]">
                                 {rollNo ? (
-                                  <span className="px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded text-[10px] font-bold">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const found = members.find(m => (m.rollNumber || (m as any).rollNo || '').trim().toUpperCase() === rollNo.trim().toUpperCase());
+                                      if (found) setSelectedMemberForDetails(found);
+                                    }}
+                                    className="px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded text-[10px] font-bold hover:bg-emerald-500/20 cursor-pointer"
+                                    title="View Member Profile"
+                                  >
                                     {rollNo}
-                                  </span>
+                                  </button>
                                 ) : (
                                   <span className="px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded text-[10px]">
                                     No Roll #
@@ -4711,11 +4931,28 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
                             {/* Actions */}
                             <td className="py-3.5 px-4 text-right">
-                              <div className="flex items-center justify-end gap-2">
+                              <div className="flex items-center justify-end gap-2 flex-wrap">
+                                {/* View Details Button */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedPaymentForDetails(record);
+                                  }}
+                                  className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 group-hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                                  title="View Details & Verification"
+                                >
+                                  <Eye className="w-3.5 h-3.5 text-blue-400" />
+                                  <span>View Details</span>
+                                </button>
+
                                 {/* Receipt PDF Button */}
                                 <button
                                   type="button"
-                                  onClick={() => setReceiptModalRecord(record)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setReceiptModalRecord(record);
+                                  }}
                                   className="px-2.5 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
                                   title="View & Download Fee Receipt"
                                 >
@@ -4727,7 +4964,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                                 {screenshotUrl && (
                                   <button
                                     type="button"
-                                    onClick={() => setScreenshotModalUrl(screenshotUrl)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setScreenshotModalUrl(screenshotUrl);
+                                    }}
                                     className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
                                     title="View Payment Screenshot"
                                   >
@@ -5403,6 +5643,56 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
         )}
       </AnimatePresence>
 
+      {/* Connected Member Details Full Screen Modal */}
+      {selectedMemberForDetails && (
+        <MemberDetailsModal
+          member={selectedMemberForDetails}
+          onClose={() => setSelectedMemberForDetails(null)}
+          allPayments={feePayments}
+          allRegistrations={registrations}
+          onCollectFee={(m) => {
+            setSelectedMemberForDetails(null);
+            handleOpenAddFeeForMember(m);
+          }}
+          onEditMember={(m) => {
+            setSelectedMemberForDetails(null);
+            handleEditMember(m);
+          }}
+          onDownloadIdCard={(m) => downloadMemberCardPDF(m, settings)}
+          onResendIdCard={(m) => handleResendIdCard(m)}
+          onViewIdCard={(m) => setCardModalMember(m)}
+          onSelectPaymentRecord={(rec) => {
+            setSelectedMemberForDetails(null);
+            setSelectedPaymentForDetails(rec);
+          }}
+          isResendingId={processingId === `resend-id-${selectedMemberForDetails.rollNumber}`}
+        />
+      )}
+
+      {/* Connected Payment Details Full Screen Modal */}
+      {selectedPaymentForDetails && (
+        <PaymentDetailsModal
+          record={selectedPaymentForDetails}
+          onClose={() => setSelectedPaymentForDetails(null)}
+          allMembers={members}
+          onViewMember={(m) => {
+            setSelectedPaymentForDetails(null);
+            setSelectedMemberForDetails(m);
+          }}
+          onViewReceiptModal={(rec) => setReceiptModalRecord(rec)}
+          onApproveFee={(rec) => {
+            handleApproveFeePayment(rec);
+          }}
+          onRejectFee={(rec) => {
+            setRejectFeeModal(rec);
+          }}
+          onOpenAddFee={(m) => {
+            setSelectedPaymentForDetails(null);
+            handleOpenAddFeeForMember(m);
+          }}
+        />
+      )}
+
       {/* Member Card Modal */}
       {cardModalMember && (
         <MemberCardModal
@@ -5957,46 +6247,60 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       </AnimatePresence>
 
       {/* Direct Add / Member Restoration Form Modal */}
-      {isDirectAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
-          <div className="bg-[#141419] border border-zinc-800 rounded-3xl p-6 max-w-3xl w-full shadow-2xl space-y-6 my-8 max-h-[92vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-                  <UserPlus className="w-6 h-6" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base sm:text-lg font-black text-white font-mono uppercase tracking-wide">
-                      Direct Member Registration & Restoration
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold font-mono">
-                      Admin Direct Entry
-                    </span>
+      <AnimatePresence>
+        {isDirectAddModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-y-auto"
+            onClick={() => setIsDirectAddModalOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-[#141419] border border-zinc-800 rounded-3xl p-6 max-w-3xl w-full shadow-2xl space-y-6 my-8 max-h-[92vh] overflow-y-auto"
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                    <UserPlus className="w-6 h-6" />
                   </div>
-                  <p className="text-xs text-zinc-400">
-                    Directly enroll walk-in members or restore past offline records with instant ID card generation.
-                  </p>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base sm:text-lg font-black text-white font-mono uppercase tracking-wide">
+                        Direct Member Registration & Restoration
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold font-mono">
+                        Admin Direct Entry
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-400">
+                      Directly enroll walk-in members or restore past offline records with instant ID card generation.
+                    </p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDirectAddModalOpen(false)}
+                  className="text-zinc-500 hover:text-white p-1 text-xl font-bold cursor-pointer rounded-lg hover:bg-zinc-800 transition"
+                >
+                  &times;
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsDirectAddModalOpen(false)}
-                className="text-zinc-500 hover:text-white p-1 text-xl font-bold cursor-pointer rounded-lg hover:bg-zinc-800 transition"
-              >
-                &times;
-              </button>
-            </div>
 
-            {directAddError && (
-              <div className="p-3.5 bg-red-950/80 border border-red-500/30 rounded-xl text-xs text-red-300 flex items-center gap-2 font-medium">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                <span>{directAddError}</span>
-              </div>
-            )}
+              {directAddError && (
+                <div className="p-3.5 bg-red-950/80 border border-red-500/30 rounded-xl text-xs text-red-300 flex items-center gap-2 font-medium">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>{directAddError}</span>
+                </div>
+              )}
 
-            <form onSubmit={handleDirectAddMemberSubmit} className="space-y-6">
+              <form onSubmit={handleDirectAddMemberSubmit} className="space-y-6">
               {/* Roll Number Mode Selection */}
               <div className="p-4 bg-[#0A0A0D] border border-zinc-800/80 rounded-2xl space-y-3">
                 <div className="flex items-center justify-between">
@@ -6374,36 +6678,51 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Add Fee Payment Modal */}
-      {isAddFeeModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
-          <div className="bg-[#141419] border border-zinc-800 rounded-3xl p-6 max-w-2xl w-full shadow-2xl space-y-6 my-8 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                  <CreditCard className="w-5 h-5 text-emerald-500" />
+      <AnimatePresence>
+        {isAddFeeModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-y-auto"
+            onClick={() => setIsAddFeeModalOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-[#141419] border border-zinc-800 rounded-3xl p-6 max-w-2xl w-full shadow-2xl space-y-6 my-8 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                    <CreditCard className="w-5 h-5 text-emerald-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white font-mono uppercase tracking-wide">
+                      ADD FEE PAYMENT
+                    </h3>
+                    <p className="text-xs text-zinc-400">
+                      Record fee payment directly. Receipt will be generated and emailed by server.
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-base font-black text-white font-mono uppercase tracking-wide">
-                    ADD FEE PAYMENT
-                  </h3>
-                  <p className="text-xs text-zinc-400">
-                    Record fee payment directly. Receipt will be generated and emailed by server.
-                  </p>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAddFeeModalOpen(false)}
+                  className="text-zinc-500 hover:text-white transition p-1"
+                >
+                  <XCircle className="w-6 h-6" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsAddFeeModalOpen(false)}
-                className="text-zinc-500 hover:text-white transition p-1"
-              >
-                <XCircle className="w-6 h-6" />
-              </button>
-            </div>
 
             {submitFeeError && (
               <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2 text-xs text-red-400 font-sans">
@@ -6993,103 +7312,120 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Member Update Success Toast */}
-      {memberSuccessToast && (
-        <div className="fixed bottom-6 right-6 z-[100] max-w-md w-full bg-[#141419] border-2 border-purple-500 rounded-3xl p-5 shadow-2xl animate-in slide-in-from-bottom-5 text-white font-sans space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-sm font-black text-purple-400 uppercase tracking-wide">
-                  Member Details Updated
-                </h4>
-                <p className="text-xs text-zinc-300 mt-0.5">
-                  {memberSuccessToast.message}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setMemberSuccessToast(null)}
-              className="text-zinc-500 hover:text-white transition p-1"
-            >
-              <XCircle className="w-5 h-5" />
-            </button>
-          </div>
-
-          {(memberSuccessToast.memberName || memberSuccessToast.rollNumber) && (
-            <div className="bg-[#0F0F12] border border-zinc-800/80 rounded-2xl p-3 space-y-1 font-mono text-xs">
-              {memberSuccessToast.memberName && (
-                <div className="flex items-center justify-between">
-                  <span className="text-zinc-500">Member:</span>
-                  <span className="text-white font-bold">{memberSuccessToast.memberName}</span>
+      <AnimatePresence>
+        {memberSuccessToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.9 }}
+            transition={{ type: "spring", damping: 20, stiffness: 300 }}
+            className="fixed bottom-6 right-6 z-[100] max-w-md w-full bg-[#141419] border-2 border-purple-500 rounded-3xl p-5 shadow-2xl text-white font-sans space-y-3"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-5 h-5" />
                 </div>
-              )}
-              {memberSuccessToast.rollNumber && (
-                <div className="flex items-center justify-between">
-                  <span className="text-zinc-500">Roll Number:</span>
-                  <span className="text-purple-400 font-bold">{memberSuccessToast.rollNumber}</span>
+                <div>
+                  <h4 className="text-sm font-black text-purple-400 uppercase tracking-wide">
+                    Member Details Updated
+                  </h4>
+                  <p className="text-xs text-zinc-300 mt-0.5">
+                    {memberSuccessToast.message}
+                  </p>
                 </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Success Toast / Receipt Notification */}
-      {feeSuccessToast && (
-        <div className="fixed bottom-6 right-6 z-[100] max-w-md w-full bg-[#141419] border-2 border-emerald-500 rounded-3xl p-5 shadow-2xl animate-in slide-in-from-bottom-5 text-white font-sans space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-5 h-5" />
               </div>
-              <div>
-                <h4 className="text-sm font-black text-emerald-400 uppercase tracking-wide">
-                  Fee Payment Successful!
-                </h4>
-                <p className="text-xs text-zinc-300 mt-0.5">
-                  {feeSuccessToast.message}
-                </p>
-              </div>
+              <button
+                onClick={() => setMemberSuccessToast(null)}
+                className="text-zinc-500 hover:text-white transition p-1 cursor-pointer"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
             </div>
-            <button
-              onClick={() => setFeeSuccessToast(null)}
-              className="text-zinc-500 hover:text-white transition p-1"
-            >
-              <XCircle className="w-5 h-5" />
-            </button>
-          </div>
 
-          <div className="bg-[#0F0F12] border border-zinc-800/80 rounded-2xl p-3 space-y-2 font-mono text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-zinc-500">Receipt Number:</span>
-              <span className="text-emerald-400 font-bold">{feeSuccessToast.receiptNumber}</span>
-            </div>
-            {feeSuccessToast.receiptUrl && (
-              <div className="pt-2 border-t border-zinc-800/60 flex items-center justify-between gap-2">
-                <span className="text-zinc-500 text-[11px] font-sans truncate max-w-[180px]">
-                  {feeSuccessToast.receiptUrl}
-                </span>
-                <a
-                  href={feeSuccessToast.receiptUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-[10px] uppercase tracking-wider rounded-lg transition flex items-center gap-1 shrink-0"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  <span>View Receipt</span>
-                </a>
+            {(memberSuccessToast.memberName || memberSuccessToast.rollNumber) && (
+              <div className="bg-[#0F0F12] border border-zinc-800/80 rounded-2xl p-3 space-y-1 font-mono text-xs">
+                {memberSuccessToast.memberName && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-500">Member:</span>
+                    <span className="text-white font-bold">{memberSuccessToast.memberName}</span>
+                  </div>
+                )}
+                {memberSuccessToast.rollNumber && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-500">Roll Number:</span>
+                    <span className="text-purple-400 font-bold">{memberSuccessToast.rollNumber}</span>
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Success Toast / Receipt Notification */}
+      <AnimatePresence>
+        {feeSuccessToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.9 }}
+            transition={{ type: "spring", damping: 20, stiffness: 300 }}
+            className="fixed bottom-6 right-6 z-[100] max-w-md w-full bg-[#141419] border-2 border-emerald-500 rounded-3xl p-5 shadow-2xl text-white font-sans space-y-3"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-emerald-400 uppercase tracking-wide">
+                    Fee Payment Successful!
+                  </h4>
+                  <p className="text-xs text-zinc-300 mt-0.5">
+                    {feeSuccessToast.message}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setFeeSuccessToast(null)}
+                className="text-zinc-500 hover:text-white transition p-1 cursor-pointer"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-[#0F0F12] border border-zinc-800/80 rounded-2xl p-3 space-y-2 font-mono text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500">Receipt Number:</span>
+                <span className="text-emerald-400 font-bold">{feeSuccessToast.receiptNumber}</span>
+              </div>
+              {feeSuccessToast.receiptUrl && (
+                <div className="pt-2 border-t border-zinc-800/60 flex items-center justify-between gap-2">
+                  <span className="text-zinc-500 text-[11px] font-sans truncate max-w-[180px]">
+                    {feeSuccessToast.receiptUrl}
+                  </span>
+                  <a
+                    href={feeSuccessToast.receiptUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-[10px] uppercase tracking-wider rounded-lg transition flex items-center gap-1 shrink-0"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>View Receipt</span>
+                  </a>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* SUCCESS ACTION CELEBRATION / REJECT STAMP MODAL */}
       <AnimatePresence>

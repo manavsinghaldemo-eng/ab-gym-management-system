@@ -202,6 +202,8 @@ function handleAction(action, data, token) {
   if (action === 'updateMember') return handleUpdateMember(data);
   if (action === 'deleteMember') return handleDeleteMember(data);
   if (action === 'directAddMember' || action === 'addMember' || action === 'restoreMember' || action === 'adminAddMember') return handleDirectAddMember(data);
+  if (action === 'resendReceipt' || action === 'resendFeeReceipt') return handleResendReceipt(data);
+  if (action === 'resendIdCard') return handleResendIdCard(data);
   if (action === 'seedSampleData') return handleSeedSampleData();
 
   return createJsonResponse({
@@ -1324,20 +1326,40 @@ function handleGetDashboard() {
     var totalPrevBal = 0;
 
     fees.forEach(function(f) {
-      var st = (f['Payment Status'] || f['paymentStatus'] || f['status'] || '').toLowerCase();
-      var amt = parseFloat(f['Amount Paid'] || f['amountPaid'] || f['Current Fee Amount'] || f['currentFeeAmount'] || f['Total Payable Amount'] || f['totalPayableAmount'] || f['Amount'] || f['amount'] || 0) || 0;
-      var pDate = cleanString(f['Payment Date'] || f['paymentDate'] || f['Timestamp'] || f['timestamp']);
+      var st = String(f['Payment Status'] || f['paymentStatus'] || f['status'] || '').trim().toLowerCase();
+      var rawAmtStr = String(f['Amount Paid'] || f['amountPaid'] || f['Current Fee Amount'] || f['currentFeeAmount'] || f['Total Payable Amount'] || f['totalPayableAmount'] || f['Amount'] || f['amount'] || '0').replace(/[^0-9.]/g, '');
+      var amt = parseFloat(rawAmtStr) || 0;
+      var rawDate = cleanString(f['Payment Date'] || f['paymentDate'] || f['Timestamp'] || f['timestamp'] || '');
 
-      var isApprovedStatus = (st === 'successful' || st === 'approved' || st === 'verified' || st === 'paid' || st === 'completed' || st === 'active');
+      var isApprovedStatus = (st === 'successful' || st === 'approved' || st === 'verified' || st === 'paid' || st === 'completed' || st === 'active' || st === 'success');
 
       if (st.indexOf('pending') !== -1) pendingFees++;
       else if (isApprovedStatus) {
         successfulFees++;
-        if (pDate.indexOf(todayStr) !== -1) todayColl += amt;
-        if (pDate.indexOf(thisMonthStr) !== -1) monthlyColl += amt;
+        // Check date matching
+        var parsedYMD = '';
+        if (rawDate) {
+          var isoM = rawDate.match(/(\\d{4})[-/.](\\d{1,2})[-/.](\\d{1,2})/);
+          if (isoM) {
+            parsedYMD = isoM[1] + '-' + (isoM[2].length === 1 ? '0' + isoM[2] : isoM[2]) + '-' + (isoM[3].length === 1 ? '0' + isoM[3] : isoM[3]);
+          } else {
+            var dmyM = rawDate.match(/(\\d{1,2})[-/.](\\d{1,2})[-/.](\\d{4})/);
+            if (dmyM) {
+              parsedYMD = dmyM[3] + '-' + (dmyM[2].length === 1 ? '0' + dmyM[2] : dmyM[2]) + '-' + (dmyM[1].length === 1 ? '0' + dmyM[1] : dmyM[1]);
+            }
+          }
+        }
+
+        if (rawDate.indexOf(todayStr) !== -1 || (parsedYMD && parsedYMD === todayStr)) {
+          todayColl += amt;
+        }
+        if (rawDate.indexOf(thisMonthStr) !== -1 || (parsedYMD && parsedYMD.indexOf(thisMonthStr) === 0)) {
+          monthlyColl += amt;
+        }
       } else if (st === 'rejected' || st === 'failed' || st === 'cancelled') rejectedFees++;
 
-      totalPrevBal += parseFloat(f['Previous Balance'] || f['previousBalance'] || 0) || 0;
+      var rawPrevBalStr = String(f['Previous Balance'] || f['previousBalance'] || '0').replace(/[^0-9.]/g, '');
+      totalPrevBal += parseFloat(rawPrevBalStr) || 0;
     });
 
     return createJsonResponse({
@@ -2211,6 +2233,335 @@ function handleDirectAddMember(data) {
     return createJsonResponse({ success: false, message: 'Failed to add/restore member: ' + err.toString() });
   } finally {
     lock.releaseLock();
+  }
+}
+
+// Resend Receipt Email Handler
+function handleResendReceipt(data) {
+  try {
+    var feeRef = cleanString(data.feeReferenceNumber || data.feeRef);
+    var rollNo = cleanString(data.rollNumber || data.rollNo);
+    var regRef = cleanString(data.registrationReferenceNumber || data.registrationRef);
+    var inputEmail = cleanString(data.email || data.emailAddress || data.memberEmail);
+    var adminName = cleanString(data.adminName) || 'Admin';
+
+    if (!feeRef && !rollNo && !regRef) {
+      return createJsonResponse({
+        success: false,
+        message: 'Fee Reference Number, Roll Number, or Registration Reference is required to resend receipt.'
+      });
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var feeSheet = ss.getSheetByName(SHEETS.FEE_PAYMENTS);
+    var matchedPayment = null;
+
+    if (feeSheet && feeSheet.getLastRow() > 1) {
+      var feeData = feeSheet.getDataRange().getValues();
+      var headers = feeData[0];
+      var feeColMap = getFeePaymentsHeaderMap(headers);
+      var feeRefIdx = headers.indexOf('Fee Reference Number');
+
+      for (var i = 1; i < feeData.length; i++) {
+        var row = feeData[i];
+        var rFeeRef = feeRefIdx !== -1 ? cleanString(row[feeRefIdx]).toUpperCase() : '';
+        var rRoll = feeColMap.rollNumber >= 0 ? cleanString(row[feeColMap.rollNumber]).toUpperCase() : '';
+        var rReg = feeColMap.registrationReferenceNumber >= 0 ? cleanString(row[feeColMap.registrationReferenceNumber]).toUpperCase() : '';
+
+        if (
+          (feeRef && rFeeRef === feeRef.toUpperCase()) ||
+          (!feeRef && rollNo && rRoll === rollNo.toUpperCase()) ||
+          (!feeRef && regRef && rReg === regRef.toUpperCase())
+        ) {
+          matchedPayment = rowToObject(headers, row);
+          break;
+        }
+      }
+    }
+
+    // If not found in Fee Payments, search Registrations sheet
+    if (!matchedPayment) {
+      var regSheet = ss.getSheetByName(SHEETS.REGISTRATIONS);
+      if (regSheet && regSheet.getLastRow() > 1) {
+        var regData = regSheet.getDataRange().getValues();
+        var regHeaders = regData[0];
+        var regColMap = getRegistrationHeaderMap(regHeaders);
+
+        for (var r = 1; r < regData.length; r++) {
+          var regRow = regData[r];
+          var regFeeRef = regColMap.feeReferenceNumber >= 0 ? cleanString(regRow[regColMap.feeReferenceNumber]).toUpperCase() : '';
+          var regRegRef = regColMap.registrationRef >= 0 ? cleanString(regRow[regColMap.registrationRef]).toUpperCase() : '';
+          var regRoll = regColMap.rollNumber >= 0 ? cleanString(regRow[regColMap.rollNumber]).toUpperCase() : '';
+
+          if (
+            (feeRef && regFeeRef === feeRef.toUpperCase()) ||
+            (regRef && regRegRef === regRef.toUpperCase()) ||
+            (rollNo && regRoll === rollNo.toUpperCase())
+          ) {
+            var regObj = rowToObject(regHeaders, regRow);
+            matchedPayment = {
+              'Fee Reference Number': feeRef || ('REG-' + (regObj['Registration Reference Number'] || regObj['Roll Number'])),
+              'Registration Reference Number': regObj['Registration Reference Number'] || '',
+              'Roll Number': regObj['Roll Number'] || '',
+              'Member Name': regObj['Full Name'] || '',
+              'Phone Number': regObj['Phone Number'] || '',
+              'Email Address': regObj['Email Address'] || '',
+              'Selected Plan': regObj['Selected Plan'] || '',
+              'Current Fee Amount': regObj['Registration Fee'] || 100,
+              'Total Payable Amount': regObj['Registration Fee'] || 100,
+              'Payment Method': regObj['Payment Method'] || 'UPI',
+              'Payment Status': regObj['Payment Status'] || regObj['Registration Status'] || 'Successful',
+              'Receipt Number': 'ABG-REC-' + (regObj['Registration Reference Number'] || regObj['Roll Number'] || '001')
+            };
+            break;
+          }
+        }
+      }
+    }
+
+    if (!matchedPayment && !feeRef) {
+      return createJsonResponse({
+        success: false,
+        message: 'No payment transaction record found.'
+      });
+    }
+
+    // Resolve details
+    var resolvedFeeRef = matchedPayment ? cleanString(matchedPayment['Fee Reference Number']) : feeRef;
+    var resolvedMemberName = matchedPayment ? cleanString(matchedPayment['Member Name'] || matchedPayment['Full Name']) : cleanString(data.memberName || data.fullName);
+    var resolvedRollNo = matchedPayment ? cleanString(matchedPayment['Roll Number']) : rollNo;
+    var resolvedRegRef = matchedPayment ? cleanString(matchedPayment['Registration Reference Number']) : regRef;
+    var resolvedPlan = matchedPayment ? cleanString(matchedPayment['Selected Plan'] || matchedPayment['Plan']) : cleanString(data.selectedPlan || data.planName);
+    var resolvedAmount = matchedPayment ? (parseFloat(matchedPayment['Current Fee Amount'] || matchedPayment['Amount Paid'] || matchedPayment['Total Payable Amount'] || matchedPayment['Amount']) || parseFloat(data.amountPaid || data.feeAmount || 0)) : parseFloat(data.amountPaid || data.feeAmount || 0);
+    var resolvedPayMethod = matchedPayment ? cleanString(matchedPayment['Payment Method']) : cleanString(data.paymentMethod || 'UPI');
+    var resolvedStatus = matchedPayment ? cleanString(matchedPayment['Payment Status'] || 'Successful') : cleanString(data.paymentStatus || 'Successful');
+    var resolvedReceiptNo = matchedPayment ? cleanString(matchedPayment['Receipt Number']) : cleanString(data.receiptNumber || data.receiptNo || '');
+
+    if (!resolvedReceiptNo) {
+      resolvedReceiptNo = 'ABG-REC-' + formatDateShort(new Date()).replace(/-/g, '') + '-' + Math.floor(100 + Math.random() * 900);
+    }
+
+    // Resolve Email Address
+    var targetEmail = inputEmail;
+    if (!targetEmail && matchedPayment) {
+      targetEmail = cleanString(matchedPayment['Email Address']);
+    }
+
+    // Secondary email lookup in Members and Registrations sheets
+    if (!targetEmail && (resolvedRollNo || resolvedRegRef)) {
+      var queryKey = (resolvedRollNo || resolvedRegRef).toUpperCase();
+      try {
+        var mSheet = ss.getSheetByName(SHEETS.MEMBERS);
+        if (mSheet && mSheet.getLastRow() > 1) {
+          var mData = mSheet.getDataRange().getValues();
+          var mHeaders = mData[0];
+          var mRollIdx = mHeaders.indexOf('Roll Number');
+          var mRegIdx = mHeaders.indexOf('Registration Reference Number');
+          var mEmailIdx = mHeaders.indexOf('Email Address');
+          for (var m = 1; m < mData.length; m++) {
+            var mRollVal = mRollIdx !== -1 ? cleanString(mData[m][mRollIdx]).toUpperCase() : '';
+            var mRegVal = mRegIdx !== -1 ? cleanString(mData[m][mRegIdx]).toUpperCase() : '';
+            if (mRollVal === queryKey || mRegVal === queryKey) {
+              if (mEmailIdx !== -1) targetEmail = cleanString(mData[m][mEmailIdx]);
+              break;
+            }
+          }
+        }
+      } catch (e) {}
+
+      if (!targetEmail) {
+        try {
+          var rSheet = ss.getSheetByName(SHEETS.REGISTRATIONS);
+          if (rSheet && rSheet.getLastRow() > 1) {
+            var rData = rSheet.getDataRange().getValues();
+            var rHeaders = rData[0];
+            var rRegIdx2 = rHeaders.indexOf('Registration Reference Number');
+            var rRollIdx2 = rHeaders.indexOf('Roll Number');
+            var rEmailIdx2 = rHeaders.indexOf('Email Address');
+            for (var r2 = 1; r2 < rData.length; r2++) {
+              var rRegVal = rRegIdx2 !== -1 ? cleanString(rData[r2][rRegIdx2]).toUpperCase() : '';
+              var rRollVal = rRollIdx2 !== -1 ? cleanString(rData[r2][rRollIdx2]).toUpperCase() : '';
+              if (rRegVal === queryKey || rRollVal === queryKey) {
+                if (rEmailIdx2 !== -1) targetEmail = cleanString(rData[r2][rEmailIdx2]);
+                break;
+              }
+            }
+          }
+        } catch (e) {}
+      }
+    }
+
+    if (!targetEmail || targetEmail.indexOf('@') === -1) {
+      return createJsonResponse({
+        success: false,
+        message: 'No registered email address found for ' + (resolvedMemberName || resolvedRollNo || resolvedFeeRef) + '. Please check member email.'
+      });
+    }
+
+    // Send receipt email
+    var emailSent = sendConfirmationEmail('fee_payment', targetEmail, {
+      memberName: resolvedMemberName || 'Gym Member',
+      feeRef: resolvedFeeRef,
+      regRef: resolvedRollNo || resolvedRegRef,
+      rollNumber: resolvedRollNo,
+      amountPaid: resolvedAmount,
+      paymentMethod: resolvedPayMethod,
+      selectedPlan: resolvedPlan,
+      status: resolvedStatus,
+      receiptNo: resolvedReceiptNo
+    });
+
+    if (!emailSent) {
+      return createJsonResponse({
+        success: false,
+        message: 'Failed to send receipt email to ' + targetEmail + '. Please check recipient email delivery status.'
+      });
+    }
+
+    logActivity(adminName, 'Resent Fee Receipt', 'Fee Payment', resolvedFeeRef, resolvedStatus, resolvedStatus, 'Receipt ' + resolvedReceiptNo + ' resent to ' + targetEmail);
+
+    return createJsonResponse({
+      success: true,
+      message: 'Verified fee receipt successfully resent to ' + targetEmail + '.',
+      receiptNumber: resolvedReceiptNo,
+      data: {
+        feeReferenceNumber: resolvedFeeRef,
+        receiptNumber: resolvedReceiptNo,
+        email: targetEmail,
+        memberName: resolvedMemberName,
+        amountPaid: resolvedAmount
+      }
+    });
+
+  } catch (err) {
+    Logger.log('handleResendReceipt error: ' + err.toString());
+    return createJsonResponse({
+      success: false,
+      message: 'Failed to resend receipt: ' + err.toString()
+    });
+  }
+}
+
+// Resend ID Card Email Handler
+function handleResendIdCard(data) {
+  try {
+    var rollNo = cleanString(data.rollNumber || data.rollNo);
+    var regRef = cleanString(data.registrationReferenceNumber || data.registrationRef);
+    var adminName = cleanString(data.adminName) || 'Admin';
+
+    if (!rollNo && !regRef) {
+      return createJsonResponse({
+        success: false,
+        message: 'Roll Number or Registration Reference is required to resend ID Card.'
+      });
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var matchedMember = null;
+    var targetEmail = '';
+    var memberName = '';
+    var plan = '';
+
+    // Check Members sheet
+    var mSheet = ss.getSheetByName(SHEETS.MEMBERS);
+    if (mSheet && mSheet.getLastRow() > 1) {
+      var mData = mSheet.getDataRange().getValues();
+      var mHeaders = mData[0];
+      var mRollIdx = mHeaders.indexOf('Roll Number');
+      var mRegIdx = mHeaders.indexOf('Registration Reference Number');
+      var mEmailIdx = mHeaders.indexOf('Email Address');
+      var mNameIdx = mHeaders.indexOf('Full Name');
+      var mPlanIdx = mHeaders.indexOf('Selected Plan');
+
+      for (var m = 1; m < mData.length; m++) {
+        var rVal = mRollIdx !== -1 ? cleanString(mData[m][mRollIdx]).toUpperCase() : '';
+        var regVal = mRegIdx !== -1 ? cleanString(mData[m][mRegIdx]).toUpperCase() : '';
+        if ((rollNo && rVal === rollNo.toUpperCase()) || (regRef && regVal === regRef.toUpperCase())) {
+          targetEmail = mEmailIdx !== -1 ? cleanString(mData[m][mEmailIdx]) : '';
+          memberName = mNameIdx !== -1 ? cleanString(mData[m][mNameIdx]) : '';
+          plan = mPlanIdx !== -1 ? cleanString(mData[m][mPlanIdx]) : '';
+          rollNo = rVal;
+          regRef = regVal;
+          matchedMember = rowToObject(mHeaders, mData[m]);
+          break;
+        }
+      }
+    }
+
+    // If not found, check Registrations sheet
+    if (!matchedMember) {
+      var rSheet = ss.getSheetByName(SHEETS.REGISTRATIONS);
+      if (rSheet && rSheet.getLastRow() > 1) {
+        var rData = rSheet.getDataRange().getValues();
+        var rHeaders = rData[0];
+        var rRollIdx2 = rHeaders.indexOf('Roll Number');
+        var rRegIdx2 = rHeaders.indexOf('Registration Reference Number');
+        var rEmailIdx2 = rHeaders.indexOf('Email Address');
+        var rNameIdx2 = rHeaders.indexOf('Full Name');
+        var rPlanIdx2 = rHeaders.indexOf('Selected Plan');
+
+        for (var r = 1; r < rData.length; r++) {
+          var rVal2 = rRollIdx2 !== -1 ? cleanString(rData[r][rRollIdx2]).toUpperCase() : '';
+          var regVal2 = rRegIdx2 !== -1 ? cleanString(rData[r][rRegIdx2]).toUpperCase() : '';
+          if ((rollNo && rVal2 === rollNo.toUpperCase()) || (regRef && regVal2 === regRef.toUpperCase())) {
+            targetEmail = rEmailIdx2 !== -1 ? cleanString(rData[r][rEmailIdx2]) : '';
+            memberName = rNameIdx2 !== -1 ? cleanString(rData[r][rNameIdx2]) : '';
+            plan = rPlanIdx2 !== -1 ? cleanString(rData[r][rPlanIdx2]) : '';
+            rollNo = rVal2;
+            regRef = regVal2;
+            matchedMember = rowToObject(rHeaders, rData[r]);
+            break;
+          }
+        }
+      }
+    }
+
+    if (!matchedMember) {
+      return createJsonResponse({
+        success: false,
+        message: 'Member record not found.'
+      });
+    }
+
+    if (!targetEmail || targetEmail.indexOf('@') === -1) {
+      return createJsonResponse({
+        success: false,
+        message: 'No registered email address found for ' + (memberName || rollNo || regRef) + '.'
+      });
+    }
+
+    var sent = sendConfirmationEmail('registration_approved', targetEmail, {
+      fullName: memberName || 'Member',
+      rollNumber: rollNo || 'Unassigned',
+      regRef: regRef || 'N/A',
+      selectedPlan: plan || 'Gym Membership'
+    });
+
+    if (!sent) {
+      return createJsonResponse({
+        success: false,
+        message: 'Failed to send ID card email to ' + targetEmail + '.'
+      });
+    }
+
+    logActivity(adminName, 'Resent Member ID Card', 'Member', rollNo || regRef, 'Active', 'Active', 'ID Card resent to ' + targetEmail);
+
+    return createJsonResponse({
+      success: true,
+      message: 'ID Card details successfully resent to ' + targetEmail + '.',
+      data: {
+        rollNumber: rollNo,
+        registrationRef: regRef,
+        email: targetEmail
+      }
+    });
+
+  } catch (err) {
+    Logger.log('handleResendIdCard error: ' + err.toString());
+    return createJsonResponse({
+      success: false,
+      message: 'Failed to resend ID Card: ' + err.toString()
+    });
   }
 }
 
