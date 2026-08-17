@@ -1,24 +1,46 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-interface RevealOnScrollProps {
+export type RevealDirection = 'up' | 'down' | 'left' | 'right' | 'zoom-in' | 'zoom-out' | 'blur-up' | 'fade' | 'none';
+
+export interface RevealOnScrollProps {
   children: React.ReactNode;
   className?: string;
   delayMs?: number;
-  direction?: 'up' | 'down' | 'left' | 'right' | 'none';
+  durationMs?: number;
+  direction?: RevealDirection;
   threshold?: number;
+  rootMargin?: string;
+  once?: boolean;
+  blur?: boolean;
+  scale?: boolean;
+  as?: React.ElementType;
+  style?: React.CSSProperties;
 }
 
 export const RevealOnScroll: React.FC<RevealOnScrollProps> = ({
   children,
   className = '',
   delayMs = 0,
+  durationMs = 700,
   direction = 'up',
   threshold = 0.1,
+  rootMargin = '0px 0px -40px 0px',
+  once = true,
+  blur = false,
+  scale = false,
+  as: Component = 'div',
+  style = {},
 }) => {
   const [isVisible, setIsVisible] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
+    // Check for reduced motion preference
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setIsVisible(true);
+      return;
+    }
+
     if (typeof IntersectionObserver === 'undefined') {
       setIsVisible(true);
       return;
@@ -28,14 +50,16 @@ export const RevealOnScroll: React.FC<RevealOnScrollProps> = ({
       ([entry]) => {
         if (entry.isIntersecting) {
           setIsVisible(true);
-          if (ref.current) {
+          if (once && ref.current) {
             observer.unobserve(ref.current);
           }
+        } else if (!once) {
+          setIsVisible(false);
         }
       },
       {
         threshold,
-        rootMargin: '0px 0px -40px 0px',
+        rootMargin,
       }
     );
 
@@ -50,28 +74,63 @@ export const RevealOnScroll: React.FC<RevealOnScrollProps> = ({
       }
       observer.disconnect();
     };
-  }, [threshold]);
+  }, [threshold, rootMargin, once]);
 
-  let initialTransform = 'translate-y-10';
-  if (direction === 'left') initialTransform = '-translate-x-10';
-  if (direction === 'right') initialTransform = 'translate-x-10';
-  if (direction === 'down') initialTransform = '-translate-y-10';
-  if (direction === 'none') initialTransform = 'scale-95';
+  // Initial transform class based on direction
+  let initialTransformClass = '';
+  switch (direction) {
+    case 'up':
+      initialTransformClass = 'translate-y-8 sm:translate-y-12';
+      break;
+    case 'down':
+      initialTransformClass = '-translate-y-8 sm:-translate-y-12';
+      break;
+    case 'left':
+      initialTransformClass = '-translate-x-8 sm:-translate-x-12';
+      break;
+    case 'right':
+      initialTransformClass = 'translate-x-8 sm:translate-x-12';
+      break;
+    case 'zoom-in':
+      initialTransformClass = 'scale-90 translate-y-4';
+      break;
+    case 'zoom-out':
+      initialTransformClass = 'scale-105';
+      break;
+    case 'blur-up':
+      initialTransformClass = 'translate-y-8 blur-sm';
+      break;
+    case 'fade':
+      initialTransformClass = '';
+      break;
+    case 'none':
+      initialTransformClass = '';
+      break;
+    default:
+      initialTransformClass = 'translate-y-8';
+  }
+
+  const customTransitionStyle: React.CSSProperties = {
+    transitionProperty: 'opacity, transform, filter',
+    transitionDuration: `${durationMs}ms`,
+    transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
+    transitionDelay: `${delayMs}ms`,
+    willChange: 'opacity, transform',
+    ...style,
+  };
+
+  const visibleClass = 'opacity-100 translate-y-0 translate-x-0 scale-100 filter-none';
+  const hiddenClass = `opacity-0 ${initialTransformClass} ${blur && direction !== 'blur-up' ? 'blur-sm' : ''} ${scale && direction !== 'zoom-in' ? 'scale-95' : ''}`;
 
   return (
-    <div
+    <Component
       ref={ref}
-      style={{
-        transitionDelay: `${delayMs}ms`,
-        willChange: 'transform, opacity',
-      }}
-      className={`transition-all duration-700 ease-out ${
-        isVisible
-          ? 'opacity-100 translate-y-0 translate-x-0 scale-100'
-          : `opacity-0 ${initialTransform}`
-      } ${className}`}
+      style={customTransitionStyle}
+      className={`transition-all ${isVisible ? visibleClass : hiddenClass} ${className}`}
     >
       {children}
-    </div>
+    </Component>
   );
 };
+
+export default RevealOnScroll;

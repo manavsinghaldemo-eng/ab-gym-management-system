@@ -47,6 +47,7 @@ import {
   XCircle,
   FileText,
 } from 'lucide-react';
+import { RevealOnScroll } from '../components/RevealOnScroll';
 import { resolveFeeMemberName } from './AdminPage';
 
 interface PayFeePageProps {
@@ -961,18 +962,20 @@ export const PayFeePage: React.FC<PayFeePageProps> = ({
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-[#f5f5f4] space-y-10">
       {/* Header */}
-      <div className="text-center space-y-3 max-w-xl mx-auto">
-        <span className="text-[10px] font-bold text-[#2563EB] uppercase tracking-[0.35em] italic flex items-center justify-center gap-2 font-mono">
-          <CreditCard className="w-3.5 h-3.5" />
-          ATHLETE FEE PORTAL
-        </span>
-        <h1 className="text-4xl sm:text-6xl font-black text-white font-display uppercase tracking-tighter">
-          PAY <span className="text-[#2563EB]">MEMBERSHIP FEE</span>
-        </h1>
-        <p className="text-xs text-zinc-400 uppercase tracking-wider font-mono">
-          Enter your AB Gym Registration Reference Number or Roll Number, registered mobile first 4 digits, and date of birth to verify and submit fee.
-        </p>
-      </div>
+      <RevealOnScroll direction="up" delayMs={50}>
+        <div className="text-center space-y-3 max-w-xl mx-auto">
+          <span className="text-[10px] font-bold text-[#2563EB] uppercase tracking-[0.35em] italic flex items-center justify-center gap-2 font-mono">
+            <CreditCard className="w-3.5 h-3.5" />
+            ATHLETE FEE PORTAL
+          </span>
+          <h1 className="text-4xl sm:text-6xl font-black text-white font-display uppercase tracking-tighter">
+            PAY <span className="text-[#2563EB]">MEMBERSHIP FEE</span>
+          </h1>
+          <p className="text-xs text-zinc-400 uppercase tracking-wider font-mono">
+            Enter your AB Gym Registration Reference Number or Roll Number, registered mobile first 4 digits, and date of birth to verify and submit fee.
+          </p>
+        </div>
+      </RevealOnScroll>
 
       {/* Member Verification Card */}
       <div className="bg-[#0A0A0A] border border-white/10 p-6 sm:p-8 rounded-3xl space-y-6 shadow-xl">

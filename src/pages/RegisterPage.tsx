@@ -29,6 +29,7 @@ import {
   Info,
   AlertTriangle,
 } from 'lucide-react';
+import { RevealOnScroll } from '../components/RevealOnScroll';
 
 interface RegisterPageProps {
   initialPlanId?: string;
@@ -360,21 +361,24 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ initialPlanId, onNav
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-[#f5f5f4] bg-[#050505]">
       {/* Page Header */}
-      <div className="text-center space-y-3 max-w-2xl mx-auto mb-10">
-        <span className="text-[10px] font-bold text-[#2563EB] uppercase tracking-[0.35em] italic flex items-center justify-center gap-2">
-          <UserPlus className="w-3.5 h-3.5" />
-          ONLINE ATHLETE REGISTRATION
-        </span>
-        <h1 className="text-4xl sm:text-6xl font-black text-white font-display uppercase tracking-tighter">
-          JOIN <span className="text-[#2563EB]">AB GYM</span>
-        </h1>
-        <p className="text-xs text-white/50 uppercase tracking-wider">
-          Enter your details below. Your official AB Gym Roll Number is generated instantly upon entering your mobile number.
-        </p>
-      </div>
+      <RevealOnScroll direction="up" delayMs={50}>
+        <div className="text-center space-y-3 max-w-2xl mx-auto mb-10">
+          <span className="text-[10px] font-bold text-[#2563EB] uppercase tracking-[0.35em] italic flex items-center justify-center gap-2">
+            <UserPlus className="w-3.5 h-3.5" />
+            ONLINE ATHLETE REGISTRATION
+          </span>
+          <h1 className="text-4xl sm:text-6xl font-black text-white font-display uppercase tracking-tighter">
+            JOIN <span className="text-[#2563EB]">AB GYM</span>
+          </h1>
+          <p className="text-xs text-white/50 uppercase tracking-wider">
+            Enter your details below. Your official AB Gym Roll Number is generated instantly upon entering your mobile number.
+          </p>
+        </div>
+      </RevealOnScroll>
 
       {/* Main Registration Card */}
-      <form onSubmit={handleSubmit} className={`bg-[#0A0A0A] border border-white/10 rounded-3xl p-6 sm:p-10 shadow-2xl space-y-8 relative ${isSubmitting ? 'pointer-events-none opacity-90' : ''}`}>
+      <RevealOnScroll direction="up" delayMs={100}>
+        <form onSubmit={handleSubmit} className={`bg-[#0A0A0A] border border-white/10 rounded-3xl p-6 sm:p-10 shadow-2xl space-y-8 relative ${isSubmitting ? 'pointer-events-none opacity-90' : ''}`}>
 
         {/* Visual Loading Indicator during API Submission */}
         {isSubmitting && (
@@ -880,6 +884,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ initialPlanId, onNav
           </button>
         </div>
       </form>
+      </RevealOnScroll>
 
       {/* Registration Confirmation Modal */}
       {submittedReg && (

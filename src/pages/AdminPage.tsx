@@ -2791,11 +2791,43 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
   // Render Login Screen if not authenticated
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-[#050505] text-[#f5f5f4] flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-[#0F0F12] border border-zinc-800/80 rounded-3xl p-8 space-y-6 shadow-2xl relative overflow-hidden">
+      <div className="min-h-screen bg-[#050505] text-[#f5f5f4] flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Animated Background Ambience */}
+        <motion.div
+          animate={{
+            scale: [1, 1.2, 1],
+            opacity: [0.15, 0.25, 0.15],
+            x: [0, 20, 0],
+            y: [0, -20, 0],
+          }}
+          transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+          className="absolute top-1/4 right-1/4 w-96 h-96 bg-red-600/20 blur-[120px] rounded-full pointer-events-none"
+        />
+        <motion.div
+          animate={{
+            scale: [1.2, 1, 1.2],
+            opacity: [0.1, 0.2, 0.1],
+            x: [0, -30, 0],
+            y: [0, 30, 0],
+          }}
+          transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
+          className="absolute bottom-1/4 left-1/4 w-96 h-96 bg-blue-600/20 blur-[120px] rounded-full pointer-events-none"
+        />
+
+        <motion.div
+          initial={{ opacity: 0, scale: 0.94, y: 24 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full max-w-md bg-[#0F0F12]/95 backdrop-blur-xl border border-zinc-800/90 rounded-3xl p-8 space-y-6 shadow-2xl relative z-10 overflow-hidden"
+        >
           <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/10 blur-3xl rounded-full" />
           <div className="text-center space-y-3">
-            <div className="flex justify-center">
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.1, duration: 0.4 }}
+              className="flex justify-center"
+            >
               <img
                 src={abGymLogo}
                 alt="AB Gym Official Logo"
@@ -2806,7 +2838,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   const fallbackEl = document.getElementById('admin-login-logo-fallback');
                   if (fallbackEl) fallbackEl.style.display = 'flex';
                 }}
-                className="h-16 w-auto object-contain filter drop-shadow-[0_0_12px_rgba(37,99,235,0.4)]"
+                className="h-16 w-auto object-contain filter drop-shadow-[0_0_14px_rgba(37,99,235,0.45)]"
               />
               <div
                 id="admin-login-logo-fallback"
@@ -2815,26 +2847,46 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               >
                 <ShieldCheck className="w-7 h-7" />
               </div>
-            </div>
-            <h1 className="text-2xl font-black text-white font-mono uppercase tracking-tight">
+            </motion.div>
+            <motion.h1
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15, duration: 0.3 }}
+              className="text-2xl font-black text-white font-mono uppercase tracking-tight"
+            >
               ADMINISTRATOR LOGIN
-            </h1>
+            </motion.h1>
           </div>
 
-          {loginError && (
-            <div className="p-3.5 bg-red-950/60 border border-red-500/30 rounded-xl text-xs text-red-400 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{loginError}</span>
-            </div>
-          )}
+          <AnimatePresence mode="wait">
+            {loginError && (
+              <motion.div
+                initial={{ opacity: 0, y: -8, height: 0 }}
+                animate={{ opacity: 1, y: 0, height: 'auto' }}
+                exit={{ opacity: 0, y: -8, height: 0 }}
+                transition={{ duration: 0.25 }}
+                className="p-3.5 bg-red-950/60 border border-red-500/30 rounded-xl text-xs text-red-400 flex items-center gap-2 overflow-hidden"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{loginError}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* DEMO CREDENTIALS HINT */}
-          <div className="p-3.5 bg-zinc-900/80 border border-zinc-800 rounded-xl text-xs space-y-2">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2, duration: 0.3 }}
+            className="p-3.5 bg-zinc-900/80 border border-zinc-800 rounded-xl text-xs space-y-2"
+          >
             <div className="flex items-center justify-between">
               <span className="font-bold text-zinc-300 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-red-500" /> Default Admin Credentials
               </span>
-              <button
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
                 type="button"
                 onClick={() => {
                   setEmail("manavsinghal.demo@gmail.com");
@@ -2844,7 +2896,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 className="text-[11px] text-red-400 hover:text-red-300 font-bold underline cursor-pointer transition-colors"
               >
                 Autofill Credentials
-              </button>
+              </motion.button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 font-mono text-[11px]">
               <div className="bg-zinc-950/60 p-2 rounded border border-zinc-800/80">
@@ -2856,7 +2908,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 <span className="text-zinc-200 font-semibold select-all">ABFitness@2026</span>
               </div>
             </div>
-          </div>
+          </motion.div>
 
           <form onSubmit={handleLogin} className="space-y-4">
             {/* ADMIN EMAIL */}
@@ -2906,7 +2958,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               </div>
             </div>
 
-            <button
+            <motion.button
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
               type="submit"
               disabled={isLoggingIn}
               className="w-full py-3.5 bg-gradient-to-r from-red-600 via-red-500 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold text-sm tracking-wider uppercase rounded-xl transition-all shadow-lg shadow-red-600/20 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
@@ -2922,18 +2976,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                   <ChevronRight className="w-4 h-4" />
                 </>
               )}
-            </button>
+            </motion.button>
           </form>
 
           <div className="text-center pt-2">
-            <button
+            <motion.button
+              whileHover={{ x: -3 }}
               onClick={() => onNavigate('/')}
-              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer inline-flex items-center gap-1"
             >
               &larr; Back to AB Gym Home
-            </button>
+            </motion.button>
           </div>
-        </div>
+        </motion.div>
       </div>
     );
   }
@@ -3120,7 +3175,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
             {/* Quick Actions */}
             <div className="flex items-center gap-2 sm:gap-3">
-              <button
+              <motion.button
+                whileHover={{ scale: 1.04, y: -1 }}
+                whileTap={{ scale: 0.96 }}
                 type="button"
                 onClick={() => handleOpenAddFeeForMember()}
                 className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-900/40 transition-all cursor-pointer"
@@ -3129,9 +3186,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 <IndianRupee className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">+ Pay Fee</span>
                 <span className="sm:hidden">+ Fee</span>
-              </button>
+              </motion.button>
 
-              <button
+              <motion.button
+                whileHover={{ scale: 1.04, y: -1 }}
+                whileTap={{ scale: 0.96 }}
                 type="button"
                 onClick={handleOpenDirectAddModal}
                 className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer"
@@ -3140,52 +3199,70 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 <UserPlus className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">+ Direct Add / Restore Member</span>
                 <span className="sm:hidden">+ Add Member</span>
-              </button>
+              </motion.button>
 
-              <button
+              <motion.button
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.96 }}
                 onClick={loadLiveData}
                 disabled={isLoading}
-                className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                 title="Refresh Live Data"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
                 <span className="hidden sm:inline">Refresh Data</span>
-              </button>
+              </motion.button>
 
-              <button
+              <motion.button
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.96 }}
                 onClick={handleLogout}
                 className="px-3 py-1.5 bg-red-950/40 border border-red-600/30 hover:bg-red-900/40 text-red-400 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Sign Out</span>
-              </button>
+              </motion.button>
             </div>
           </div>
 
-          {error && (
-            <div className="bg-red-950/80 border border-red-500 text-red-200 px-4 py-3 rounded-2xl my-2 flex items-center justify-between font-sans text-sm animate-in fade-in">
-              <div className="flex items-center gap-3">
-                <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
-                <span>{error}</span>
-              </div>
-              <button type="button" onClick={() => setError('')} className="text-red-400 font-bold ml-4 hover:text-white cursor-pointer">✕</button>
-            </div>
-          )}
-
-          {sheetError && (
-            <div className="bg-red-950/40 border border-red-500/40 rounded-2xl p-4 my-2 flex items-start gap-3.5 animate-in fade-in">
-              <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-              <div>
-                <h4 className="text-sm font-bold text-red-300">Google Sheet Connection Notice</h4>
-                <p className="text-xs text-red-200/90 mt-1 leading-relaxed">
-                  {sheetError}
-                </p>
-                <div className="mt-2 text-[11px] text-zinc-400">
-                  💡 <strong className="text-zinc-300">Fix tip:</strong> Ensure your Google Apps Script Web App URL is deployed with <span className="font-mono bg-zinc-800 px-1 py-0.5 rounded text-zinc-200">Who has access: Anyone</span>.
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, y: -10 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                exit={{ opacity: 0, height: 0, y: -10 }}
+                className="bg-red-950/80 border border-red-500 text-red-200 px-4 py-3 rounded-2xl my-2 flex items-center justify-between font-sans text-sm overflow-hidden"
+              >
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+                  <span>{error}</span>
                 </div>
-              </div>
-            </div>
-          )}
+                <button type="button" onClick={() => setError('')} className="text-red-400 font-bold ml-4 hover:text-white cursor-pointer">✕</button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {sheetError && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, y: -10 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                exit={{ opacity: 0, height: 0, y: -10 }}
+                className="bg-red-950/40 border border-red-500/40 rounded-2xl p-4 my-2 flex items-start gap-3.5 overflow-hidden"
+              >
+                <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-sm font-bold text-red-300">Google Sheet Connection Notice</h4>
+                  <p className="text-xs text-red-200/90 mt-1 leading-relaxed">
+                    {sheetError}
+                  </p>
+                  <div className="mt-2 text-[11px] text-zinc-400">
+                    💡 <strong className="text-zinc-300">Fix tip:</strong> Ensure your Google Apps Script Web App URL is deployed with <span className="font-mono bg-zinc-800 px-1 py-0.5 rounded text-zinc-200">Who has access: Anyone</span>.
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Sub Navigation Tabs */}
           <nav className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none border-t border-zinc-800/40 pt-1">
@@ -3200,23 +3277,36 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               return (
-                <button
+                <motion.button
                   key={tab.id}
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => handleTabChange(tab.id)}
-                  className={`px-3.5 py-2.5 rounded-t-lg font-bold text-xs uppercase tracking-wider flex items-center gap-2 border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+                  className={`relative px-3.5 py-2.5 rounded-t-lg font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-colors whitespace-nowrap cursor-pointer z-10 ${
                     isActive
-                      ? 'border-red-500 text-white bg-zinc-800/60'
-                      : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40'
+                      ? 'text-white'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/30'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  {isActive && (
+                    <motion.div
+                      layoutId="activeAdminTabIndicator"
+                      className="absolute inset-0 bg-zinc-800/80 rounded-t-lg border-b-2 border-red-500 z-[-1]"
+                      transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                    />
+                  )}
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-red-500' : 'text-zinc-400'}`} />
                   <span>{tab.label}</span>
                   {tab.count !== undefined && tab.count > 0 && (
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-red-600 text-white font-bold">
+                    <motion.span
+                      initial={{ scale: 0.8 }}
+                      animate={{ scale: 1 }}
+                      className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-red-600 text-white font-bold shadow-sm shadow-red-600/50"
+                    >
                       {tab.count}
-                    </span>
+                    </motion.span>
                   )}
-                </button>
+                </motion.button>
               );
             })}
           </nav>
@@ -3225,232 +3315,309 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
       {/* Main Workspace Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* TAB 1: DASHBOARD */}
-        {activeTab === 'dashboard' && (
-          <div className="space-y-8">
-            {/* KPI Cards Grid */}
-            <div className="space-y-3">
-              <h2 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
-                <LayoutDashboard className="w-4 h-4 text-red-500" />
-                Live Key Performance Metrics
-              </h2>
+        <AnimatePresence mode="wait">
+          {/* TAB 1: DASHBOARD */}
+          {activeTab === 'dashboard' && (
+            <motion.div
+              key="dashboard"
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -14 }}
+              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+              className="space-y-8"
+            >
+              {/* KPI Cards Grid */}
+              <div className="space-y-3">
+                <h2 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                  <LayoutDashboard className="w-4 h-4 text-red-500" />
+                  Live Key Performance Metrics
+                </h2>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                {/* 1. Registrations */}
-                <div className="p-4 bg-[#0F0F12] border border-zinc-800/80 rounded-2xl space-y-1">
-                  <span className="text-[11px] font-bold text-zinc-400 uppercase">Total Registrations</span>
-                  <div className="text-2xl font-black text-white font-mono">{stats?.totalRegistrations ?? registrations.length}</div>
-                </div>
-
-                <div className="p-4 bg-[#0F0F12] border border-amber-500/20 rounded-2xl space-y-1">
-                  <span className="text-[11px] font-bold text-amber-400 uppercase">Pending Regs</span>
-                  <div className="text-2xl font-black text-amber-400 font-mono">
-                    {stats?.pendingRegistrations ?? registrations.filter(r => r.status === 'Pending Verification' || (r.status as string) === 'Pending').length}
-                  </div>
-                </div>
-
-                <div className="p-4 bg-[#0F0F12] border border-emerald-500/20 rounded-2xl space-y-1">
-                  <span className="text-[11px] font-bold text-emerald-400 uppercase">Approved Regs</span>
-                  <div className="text-2xl font-black text-emerald-400 font-mono">
-                    {stats?.approvedRegistrations ?? registrations.filter(r => isStatusApproved(r.status)).length}
-                  </div>
-                </div>
-
-                <div className="p-4 bg-[#0F0F12] border border-red-500/20 rounded-2xl space-y-1">
-                  <span className="text-[11px] font-bold text-red-400 uppercase">Rejected Regs</span>
-                  <div className="text-2xl font-black text-red-400 font-mono">
-                    {stats?.rejectedRegistrations ?? registrations.filter(r => isStatusRejected(r.status)).length}
-                  </div>
-                </div>
-
-                {/* 2. Members */}
-                <div className="p-4 bg-[#0F0F12] border border-zinc-800/80 rounded-2xl space-y-1">
-                  <span className="text-[11px] font-bold text-zinc-400 uppercase">Total Members</span>
-                  <div className="text-2xl font-black text-white font-mono">{stats?.totalMembers ?? members.length}</div>
-                </div>
-
-                <div className="p-4 bg-[#0F0F12] border border-emerald-500/20 rounded-2xl space-y-1">
-                  <span className="text-[11px] font-bold text-emerald-400 uppercase">Active Members</span>
-                  <div className="text-2xl font-black text-emerald-400 font-mono">
-                    {stats?.activeMembers ?? members.filter(m => isStatusApproved(m.status)).length}
-                  </div>
-                </div>
-
-                <div className="p-4 bg-[#0F0F12] border border-zinc-700/60 rounded-2xl space-y-1">
-                  <span className="text-[11px] font-bold text-zinc-400 uppercase">Expired Members</span>
-                  <div className="text-2xl font-black text-zinc-400 font-mono">
-                    {stats?.expiredMembers ?? members.filter(m => m.status === 'Expired').length}
-                  </div>
-                </div>
-
-                {/* 3. Fee Payments */}
-                <div className="p-4 bg-[#0F0F12] border border-amber-500/20 rounded-2xl space-y-1">
-                  <span className="text-[11px] font-bold text-amber-400 uppercase">Pending Fee Payments</span>
-                  <div className="text-2xl font-black text-amber-400 font-mono">
-                    {stats?.pendingFeePayments ?? feePayments.filter(f => !isStatusApproved(f.status) && !isStatusRejected(f.status)).length}
-                  </div>
-                </div>
-
-                <div className="p-4 bg-[#0F0F12] border border-emerald-500/20 rounded-2xl space-y-1">
-                  <span className="text-[11px] font-bold text-emerald-400 uppercase">Successful Fees</span>
-                  <div className="text-2xl font-black text-emerald-400 font-mono">
-                    {stats?.successfulFeePayments ?? feePayments.filter(f => isStatusApproved(f.status)).length}
-                  </div>
-                </div>
-
-                <div className="p-4 bg-[#0F0F12] border border-red-500/20 rounded-2xl space-y-1">
-                  <span className="text-[11px] font-bold text-red-400 uppercase">Rejected Fees</span>
-                  <div className="text-2xl font-black text-red-400 font-mono">
-                    {stats?.rejectedFeePayments ?? feePayments.filter(f => isStatusRejected(f.status)).length}
-                  </div>
-                </div>
-
-                {/* 4. Revenue */}
-                <div className="p-4 bg-gradient-to-br from-emerald-950/40 to-emerald-900/20 border border-emerald-500/30 rounded-2xl space-y-1">
-                  <span className="text-[11px] font-bold text-emerald-300 uppercase">Today's Collection</span>
-                  <div className="text-2xl font-black text-emerald-300 font-mono">
-                    ₹{(stats?.todayCollection ?? 0).toLocaleString()}
-                  </div>
-                </div>
-
-                <div className="p-4 bg-gradient-to-br from-blue-950/40 to-blue-900/20 border border-blue-500/30 rounded-2xl space-y-1">
-                  <span className="text-[11px] font-bold text-blue-300 uppercase">Monthly Collection</span>
-                  <div className="text-2xl font-black text-blue-300 font-mono">
-                    ₹{(stats?.monthlyCollection ?? feePayments.filter(f => isStatusApproved(f.status)).reduce((a, b) => a + (Number(b.amountPaid) || 0), 0)).toLocaleString()}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Recent Activity Section */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Recent Registrations Card */}
-              <div className="bg-[#0F0F12] border border-zinc-800/80 rounded-3xl p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                    <UserCheck className="w-4 h-4 text-red-500" />
-                    Recent Registrations
-                  </h3>
-                  <button
-                    onClick={() => handleTabChange('registrations')}
-                    className="text-xs text-red-400 hover:text-red-300 font-bold flex items-center gap-1"
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {/* 1. Registrations */}
+                  <motion.div
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="p-4 bg-[#0F0F12] border border-zinc-800/80 hover:border-zinc-700 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
                   >
-                    <span>View All</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                    <span className="text-[11px] font-bold text-zinc-400 uppercase">Total Registrations</span>
+                    <div className="text-2xl font-black text-white font-mono">{stats?.totalRegistrations ?? registrations.length}</div>
+                  </motion.div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b border-zinc-800 text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
-                        <th className="py-2.5 px-3">Reg Ref</th>
-                        <th className="py-2.5 px-3">Name & Phone</th>
-                        <th className="py-2.5 px-3">Plan</th>
-                        <th className="py-2.5 px-3">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-800/50 text-zinc-300 font-mono">
-                      {registrations.slice(0, 5).map((r) => (
-                        <tr key={r.id || r.registrationRef} className="hover:bg-zinc-800/30 transition-colors">
-                          <td className="py-2.5 px-3 font-bold text-red-400">{r.registrationRef}</td>
-                          <td className="py-2.5 px-3 font-sans">
-                            <div className="font-bold text-white">{r.fullName}</div>
-                            <div className="text-[11px] text-zinc-400">{r.phone}</div>
-                          </td>
-                          <td className="py-2.5 px-3 font-sans text-zinc-300">{r.planName}</td>
-                          <td className="py-2.5 px-3 font-sans">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                isStatusApproved(r.status)
-                                  ? 'bg-emerald-500/20 text-emerald-400'
-                                  : isStatusRejected(r.status)
-                                  ? 'bg-red-500/20 text-red-400'
-                                  : 'bg-amber-500/20 text-amber-400 animate-pulse'
-                              }`}
-                            >
-                              {r.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                      {registrations.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="py-6 text-center text-zinc-500 font-sans">
-                            No live records found.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Recent Fee Payments Card */}
-              <div className="bg-[#0F0F12] border border-zinc-800/80 rounded-3xl p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                    <CreditCard className="w-4 h-4 text-emerald-500" />
-                    Recent Fee Payments
-                  </h3>
-                  <button
-                    onClick={() => handleTabChange('fee-records')}
-                    className="text-xs text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1"
+                  <motion.div
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="p-4 bg-[#0F0F12] border border-amber-500/20 hover:border-amber-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
                   >
-                    <span>View All</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                    <span className="text-[11px] font-bold text-amber-400 uppercase">Pending Regs</span>
+                    <div className="text-2xl font-black text-amber-400 font-mono">
+                      {stats?.pendingRegistrations ?? registrations.filter(r => r.status === 'Pending Verification' || (r.status as string) === 'Pending').length}
+                    </div>
+                  </motion.div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b border-zinc-800 text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
-                        <th className="py-2.5 px-3">Fee Ref</th>
-                        <th className="py-2.5 px-3">Member</th>
-                        <th className="py-2.5 px-3">Amount</th>
-                        <th className="py-2.5 px-3">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-800/50 text-zinc-300 font-mono">
-                      {feePayments.slice(0, 5).map((f) => (
-                        <tr key={f.id || f.feeReferenceNumber} className="hover:bg-zinc-800/30 transition-colors">
-                          <td className="py-2.5 px-3 font-bold text-emerald-400">{f.feeReferenceNumber}</td>
-                          <td className="py-2.5 px-3 font-sans font-bold text-white">{f.memberName}</td>
-                          <td className="py-2.5 px-3 font-bold text-white">₹{f.amountPaid}</td>
-                          <td className="py-2.5 px-3 font-sans">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                isStatusApproved(f.status)
-                                  ? 'bg-emerald-500/20 text-emerald-400'
-                                  : isStatusRejected(f.status)
-                                  ? 'bg-red-500/20 text-red-400'
-                                  : 'bg-amber-500/20 text-amber-400'
-                              }`}
-                            >
-                              {f.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                      {feePayments.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="py-6 text-center text-zinc-500 font-sans">
-                            No live records found.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                  <motion.div
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="p-4 bg-[#0F0F12] border border-emerald-500/20 hover:border-emerald-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
+                  >
+                    <span className="text-[11px] font-bold text-emerald-400 uppercase">Approved Regs</span>
+                    <div className="text-2xl font-black text-emerald-400 font-mono">
+                      {stats?.approvedRegistrations ?? registrations.filter(r => isStatusApproved(r.status)).length}
+                    </div>
+                  </motion.div>
+
+                  <motion.div
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="p-4 bg-[#0F0F12] border border-red-500/20 hover:border-red-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
+                  >
+                    <span className="text-[11px] font-bold text-red-400 uppercase">Rejected Regs</span>
+                    <div className="text-2xl font-black text-red-400 font-mono">
+                      {stats?.rejectedRegistrations ?? registrations.filter(r => isStatusRejected(r.status)).length}
+                    </div>
+                  </motion.div>
+
+                  {/* 2. Members */}
+                  <motion.div
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="p-4 bg-[#0F0F12] border border-zinc-800/80 hover:border-zinc-700 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
+                  >
+                    <span className="text-[11px] font-bold text-zinc-400 uppercase">Total Members</span>
+                    <div className="text-2xl font-black text-white font-mono">{stats?.totalMembers ?? members.length}</div>
+                  </motion.div>
+
+                  <motion.div
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="p-4 bg-[#0F0F12] border border-emerald-500/20 hover:border-emerald-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
+                  >
+                    <span className="text-[11px] font-bold text-emerald-400 uppercase">Active Members</span>
+                    <div className="text-2xl font-black text-emerald-400 font-mono">
+                      {stats?.activeMembers ?? members.filter(m => isStatusApproved(m.status)).length}
+                    </div>
+                  </motion.div>
+
+                  <motion.div
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="p-4 bg-[#0F0F12] border border-zinc-700/60 hover:border-zinc-600 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
+                  >
+                    <span className="text-[11px] font-bold text-zinc-400 uppercase">Expired Members</span>
+                    <div className="text-2xl font-black text-zinc-400 font-mono">
+                      {stats?.expiredMembers ?? members.filter(m => m.status === 'Expired').length}
+                    </div>
+                  </motion.div>
+
+                  {/* 3. Fee Payments */}
+                  <motion.div
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="p-4 bg-[#0F0F12] border border-amber-500/20 hover:border-amber-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
+                  >
+                    <span className="text-[11px] font-bold text-amber-400 uppercase">Pending Fee Payments</span>
+                    <div className="text-2xl font-black text-amber-400 font-mono">
+                      {stats?.pendingFeePayments ?? feePayments.filter(f => !isStatusApproved(f.status) && !isStatusRejected(f.status)).length}
+                    </div>
+                  </motion.div>
+
+                  <motion.div
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="p-4 bg-[#0F0F12] border border-emerald-500/20 hover:border-emerald-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
+                  >
+                    <span className="text-[11px] font-bold text-emerald-400 uppercase">Successful Fees</span>
+                    <div className="text-2xl font-black text-emerald-400 font-mono">
+                      {stats?.successfulFeePayments ?? feePayments.filter(f => isStatusApproved(f.status)).length}
+                    </div>
+                  </motion.div>
+
+                  <motion.div
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="p-4 bg-[#0F0F12] border border-red-500/20 hover:border-red-500/40 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
+                  >
+                    <span className="text-[11px] font-bold text-red-400 uppercase">Rejected Fees</span>
+                    <div className="text-2xl font-black text-red-400 font-mono">
+                      {stats?.rejectedFeePayments ?? feePayments.filter(f => isStatusRejected(f.status)).length}
+                    </div>
+                  </motion.div>
+
+                  {/* 4. Revenue */}
+                  <motion.div
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="p-4 bg-gradient-to-br from-emerald-950/40 to-emerald-900/20 border border-emerald-500/30 hover:border-emerald-500/60 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
+                  >
+                    <span className="text-[11px] font-bold text-emerald-300 uppercase">Today's Collection</span>
+                    <div className="text-2xl font-black text-emerald-300 font-mono">
+                      ₹{(stats?.todayCollection ?? 0).toLocaleString()}
+                    </div>
+                  </motion.div>
+
+                  <motion.div
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="p-4 bg-gradient-to-br from-blue-950/40 to-blue-900/20 border border-blue-500/30 hover:border-blue-500/60 rounded-2xl space-y-1 shadow-md hover:shadow-xl transition-colors"
+                  >
+                    <span className="text-[11px] font-bold text-blue-300 uppercase">Monthly Collection</span>
+                    <div className="text-2xl font-black text-blue-300 font-mono">
+                      ₹{(stats?.monthlyCollection ?? feePayments.filter(f => isStatusApproved(f.status)).reduce((a, b) => a + (Number(b.amountPaid) || 0), 0)).toLocaleString()}
+                    </div>
+                  </motion.div>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
+
+              {/* Recent Activity Section */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Recent Registrations Card */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 }}
+                  className="bg-[#0F0F12] border border-zinc-800/80 rounded-3xl p-6 space-y-4 shadow-xl"
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      <UserCheck className="w-4 h-4 text-red-500" />
+                      Recent Registrations
+                    </h3>
+                    <motion.button
+                      whileHover={{ x: 2 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => handleTabChange('registrations')}
+                      className="text-xs text-red-400 hover:text-red-300 font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>View All</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </motion.button>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-zinc-800 text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
+                          <th className="py-2.5 px-3">Reg Ref</th>
+                          <th className="py-2.5 px-3">Name & Phone</th>
+                          <th className="py-2.5 px-3">Plan</th>
+                          <th className="py-2.5 px-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800/50 text-zinc-300 font-mono">
+                        {registrations.slice(0, 5).map((r) => (
+                          <tr key={r.id || r.registrationRef} className="hover:bg-zinc-800/30 transition-colors">
+                            <td className="py-2.5 px-3 font-bold text-red-400">{r.registrationRef}</td>
+                            <td className="py-2.5 px-3 font-sans">
+                              <div className="font-bold text-white">{r.fullName}</div>
+                              <div className="text-[11px] text-zinc-400">{r.phone}</div>
+                            </td>
+                            <td className="py-2.5 px-3 font-sans text-zinc-300">{r.planName}</td>
+                            <td className="py-2.5 px-3 font-sans">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  isStatusApproved(r.status)
+                                    ? 'bg-emerald-500/20 text-emerald-400'
+                                    : isStatusRejected(r.status)
+                                    ? 'bg-red-500/20 text-red-400'
+                                    : 'bg-amber-500/20 text-amber-400 animate-pulse'
+                                }`}
+                              >
+                                {r.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {registrations.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="py-6 text-center text-zinc-500 font-sans">
+                              No live records found.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </motion.div>
+
+                {/* Recent Fee Payments Card */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.15 }}
+                  className="bg-[#0F0F12] border border-zinc-800/80 rounded-3xl p-6 space-y-4 shadow-xl"
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      <CreditCard className="w-4 h-4 text-emerald-500" />
+                      Recent Fee Payments
+                    </h3>
+                    <motion.button
+                      whileHover={{ x: 2 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => handleTabChange('fee-records')}
+                      className="text-xs text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>View All</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </motion.button>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-zinc-800 text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
+                          <th className="py-2.5 px-3">Fee Ref</th>
+                          <th className="py-2.5 px-3">Member</th>
+                          <th className="py-2.5 px-3">Amount</th>
+                          <th className="py-2.5 px-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800/50 text-zinc-300 font-mono">
+                        {feePayments.slice(0, 5).map((f) => (
+                          <tr key={f.id || f.feeReferenceNumber} className="hover:bg-zinc-800/30 transition-colors">
+                            <td className="py-2.5 px-3 font-bold text-emerald-400">{f.feeReferenceNumber}</td>
+                            <td className="py-2.5 px-3 font-sans font-bold text-white">{f.memberName}</td>
+                            <td className="py-2.5 px-3 font-bold text-white">₹{f.amountPaid}</td>
+                            <td className="py-2.5 px-3 font-sans">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  isStatusApproved(f.status)
+                                    ? 'bg-emerald-500/20 text-emerald-400'
+                                    : isStatusRejected(f.status)
+                                    ? 'bg-red-500/20 text-red-400'
+                                    : 'bg-amber-500/20 text-amber-400'
+                                }`}
+                              >
+                                {f.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {feePayments.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="py-6 text-center text-zinc-500 font-sans">
+                              No live records found.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </motion.div>
+              </div>
+            </motion.div>
+          )}
 
         {/* TAB 2: REGISTRATIONS */}
         {activeTab === 'registrations' && (
-          <div className="space-y-6">
+          <motion.div
+            key="registrations"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -14 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            className="space-y-6"
+          >
             {error && (
               <div className="bg-red-950/80 border border-red-500 text-red-200 px-4 py-3 rounded-xl font-sans text-sm flex items-center justify-between animate-in fade-in">
                 <span>{error}</span>
@@ -3791,12 +3958,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 </table>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* TAB 3: MEMBERS */}
         {activeTab === 'members' && (
-          <div className="space-y-6">
+          <motion.div
+            key="members"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -14 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            className="space-y-6"
+          >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl font-black text-white font-mono uppercase tracking-tight flex items-center gap-2">
@@ -3966,12 +4140,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 </table>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* TAB 4: FEE PAYMENTS */}
         {activeTab === 'fee-records' && (
-          <div className="space-y-6">
+          <motion.div
+            key="fee-records"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -14 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            className="space-y-6"
+          >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl font-black text-white font-mono uppercase tracking-tight flex items-center gap-2">
@@ -4259,12 +4440,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 </table>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* TAB 5: PAYMENT HISTORY */}
         {activeTab === 'payment-history' && (
-          <div className="space-y-6">
+          <motion.div
+            key="payment-history"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -14 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            className="space-y-6"
+          >
             {/* Header / KPI Banner */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#0F0F12] border border-zinc-800/80 p-6 rounded-3xl shadow-xl">
               <div>
@@ -4557,12 +4745,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 </table>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* TAB 6: QR CODE ATTENDANCE SCANNER */}
         {activeTab === 'attendance' && (
-          <div className="space-y-6">
+          <motion.div
+            key="attendance"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -14 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            className="space-y-6"
+          >
             {/* Header & Scanner Bar */}
             <div className="bg-[#0F0F12] border border-zinc-800/80 p-6 rounded-3xl shadow-xl space-y-6">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -4682,12 +4877,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 </table>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* TAB 7: GOOGLE SHEETS BACKEND SETUP */}
         {activeTab === 'settings' && (
-          <div className="space-y-8 max-w-4xl mx-auto">
+          <motion.div
+            key="settings"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -14 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            className="space-y-8 max-w-4xl mx-auto"
+          >
             {/* SECTION 1: UPI PAYMENT & QR CODE SETTINGS */}
             <form onSubmit={handleSaveGymSettings} className="bg-[#0F0F12] border border-zinc-800/80 rounded-3xl p-6 space-y-6 shadow-xl">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-800/80 pb-4 gap-3">
@@ -4916,237 +5118,290 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 Refresh Google Sheet Data
               </button>
             </div>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
       </main>
 
       {/* MODAL 1: Payment Screenshot Viewer */}
-      {screenshotModalUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-          <div className="relative max-w-2xl w-full bg-[#0F0F12] border border-zinc-800 rounded-3xl p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                <Eye className="w-4 h-4 text-blue-400" />
-                Payment Proof / Screenshot
-              </h3>
-              <button
-                onClick={() => setScreenshotModalUrl(null)}
-                className="text-zinc-400 hover:text-white p-1 rounded-lg"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="max-h-[70vh] overflow-auto flex justify-center bg-black/50 p-4 rounded-2xl">
-              <img src={screenshotModalUrl} alt="Payment Screenshot" className="max-w-full h-auto rounded-xl shadow-lg" />
-            </div>
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {screenshotModalUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 16 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              className="relative max-w-2xl w-full bg-[#0F0F12] border border-zinc-800 rounded-3xl p-6 space-y-4 shadow-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Eye className="w-4 h-4 text-blue-400" />
+                  Payment Proof / Screenshot
+                </h3>
+                <button
+                  onClick={() => setScreenshotModalUrl(null)}
+                  className="text-zinc-400 hover:text-white p-1 rounded-lg cursor-pointer"
+                >
+                  &times;
+                </button>
+              </div>
+              <div className="max-h-[70vh] overflow-auto flex justify-center bg-black/50 p-4 rounded-2xl">
+                <img src={screenshotModalUrl} alt="Payment Screenshot" className="max-w-full h-auto rounded-xl shadow-lg" />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* MODAL 2: View Registration Full Details */}
-      {viewRegModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-          <div className="relative max-w-lg w-full bg-[#0F0F12] border border-zinc-800 rounded-3xl p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
-                REGISTRATION: {viewRegModal.registrationReferenceNumber || viewRegModal.registrationRef}
-              </h3>
-              <button
-                onClick={() => setViewRegModal(null)}
-                className="text-zinc-400 hover:text-white text-lg font-bold"
-              >
-                &times;
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs text-zinc-300 font-sans max-h-[65vh] overflow-y-auto pr-1">
-              <div className="grid grid-cols-2 gap-2 p-3 bg-[#141419] rounded-xl font-mono text-[11px]">
-                <div><span className="text-zinc-500">Full Name:</span> <strong className="text-white font-sans">{viewRegModal.fullName}</strong></div>
-                <div><span className="text-zinc-500">Assigned Roll:</span> <span className="text-blue-400 font-bold">{viewRegModal.rollNumber || 'Unassigned'}</span></div>
-                <div><span className="text-zinc-500">Gender:</span> {viewRegModal.gender || 'N/A'}</div>
-                <div><span className="text-zinc-500">Date of Birth:</span> {viewRegModal.dateOfBirth || viewRegModal.dob || 'N/A'}</div>
-                <div><span className="text-zinc-500">Phone:</span> {viewRegModal.phoneNumber || viewRegModal.phone || 'N/A'}</div>
-                <div><span className="text-zinc-500">Email:</span> {viewRegModal.emailAddress || viewRegModal.email || 'N/A'}</div>
-                <div><span className="text-zinc-500">Selected Plan:</span> {viewRegModal.selectedPlan || viewRegModal.planName || 'N/A'}</div>
-                <div><span className="text-zinc-500">Registration Fee:</span> ₹{viewRegModal.registrationFee}</div>
-                <div><span className="text-zinc-500">Payment Method:</span> {viewRegModal.paymentMethod || 'N/A'}</div>
-                <div><span className="text-zinc-500">Payment Status:</span> {viewRegModal.paymentStatus || 'N/A'}</div>
-                <div><span className="text-zinc-500">UPI Txn ID:</span> {viewRegModal.upiTransactionId || viewRegModal.upiTxnId || 'N/A'}</div>
-                <div><span className="text-zinc-500">Status:</span> <span className="font-bold text-amber-400">{viewRegModal.registrationStatus || viewRegModal.status}</span></div>
-              </div>
-
-              <div>
-                <span className="text-zinc-500 font-mono">Address:</span> <p className="text-white mt-0.5">{viewRegModal.address || 'N/A'}</p>
-              </div>
-              <div>
-                <span className="text-zinc-500 font-mono">Emergency Contact:</span> <p className="text-white mt-0.5">{viewRegModal.emergencyContactNumber || viewRegModal.emergencyContact || 'N/A'}</p>
-              </div>
-              <div>
-                <span className="text-zinc-500 font-mono">Fitness Goal:</span> <p className="text-white mt-0.5">{viewRegModal.fitnessGoal || 'N/A'}</p>
-              </div>
-              {viewRegModal.adminRemarks && (
-                <div>
-                  <span className="text-zinc-500 font-mono">Admin Remarks:</span> <p className="text-zinc-300 mt-0.5">{viewRegModal.adminRemarks}</p>
-                </div>
-              )}
-              {viewRegModal.rejectionReason && (
-                <div>
-                  <span className="text-red-400 font-mono">Rejection Reason:</span> <p className="text-red-300 mt-0.5">{viewRegModal.rejectionReason}</p>
-                </div>
-              )}
-            </div>
-
-            <div className="pt-2 flex items-center justify-between border-t border-zinc-800">
-              <div className="flex items-center gap-2">
+      <AnimatePresence>
+        {viewRegModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 16 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              className="relative max-w-lg w-full bg-[#0F0F12] border border-zinc-800 rounded-3xl p-6 space-y-4 shadow-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
+                  REGISTRATION: {viewRegModal.registrationReferenceNumber || viewRegModal.registrationRef}
+                </h3>
                 <button
-                  type="button"
-                  onClick={() => {
-                    const reg = viewRegModal;
-                    setViewRegModal(null);
-                    setEditingRegistration(reg);
-                  }}
-                  className="px-3 py-1.5 bg-purple-900/40 hover:bg-purple-900/60 text-purple-300 border border-purple-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                  onClick={() => setViewRegModal(null)}
+                  className="text-zinc-400 hover:text-white text-lg font-bold cursor-pointer"
                 >
-                  <Edit3 className="w-3.5 h-3.5 text-purple-400" />
-                  <span>Edit / Restore</span>
+                  &times;
                 </button>
-                {!isStatusApproved(viewRegModal.registrationStatus || viewRegModal.status) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const reg = viewRegModal;
-                      setViewRegModal(null);
-                      handleApproveRegistration(reg);
-                    }}
-                    disabled={
-                      processingId === getRegistrationReference(viewRegModal)
-                    }
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>
-                      {processingId === getRegistrationReference(viewRegModal)
-                        ? "Approving..."
-                        : "Approve"}
-                    </span>
-                  </button>
+              </div>
+
+              <div className="space-y-3 text-xs text-zinc-300 font-sans max-h-[65vh] overflow-y-auto pr-1">
+                <div className="grid grid-cols-2 gap-2 p-3 bg-[#141419] rounded-xl font-mono text-[11px]">
+                  <div><span className="text-zinc-500">Full Name:</span> <strong className="text-white font-sans">{viewRegModal.fullName}</strong></div>
+                  <div><span className="text-zinc-500">Assigned Roll:</span> <span className="text-blue-400 font-bold">{viewRegModal.rollNumber || 'Unassigned'}</span></div>
+                  <div><span className="text-zinc-500">Gender:</span> {viewRegModal.gender || 'N/A'}</div>
+                  <div><span className="text-zinc-500">Date of Birth:</span> {viewRegModal.dateOfBirth || viewRegModal.dob || 'N/A'}</div>
+                  <div><span className="text-zinc-500">Phone:</span> {viewRegModal.phoneNumber || viewRegModal.phone || 'N/A'}</div>
+                  <div><span className="text-zinc-500">Email:</span> {viewRegModal.emailAddress || viewRegModal.email || 'N/A'}</div>
+                  <div><span className="text-zinc-500">Selected Plan:</span> {viewRegModal.selectedPlan || viewRegModal.planName || 'N/A'}</div>
+                  <div><span className="text-zinc-500">Registration Fee:</span> ₹{viewRegModal.registrationFee}</div>
+                  <div><span className="text-zinc-500">Payment Method:</span> {viewRegModal.paymentMethod || 'N/A'}</div>
+                  <div><span className="text-zinc-500">Payment Status:</span> {viewRegModal.paymentStatus || 'N/A'}</div>
+                  <div><span className="text-zinc-500">UPI Txn ID:</span> {viewRegModal.upiTransactionId || viewRegModal.upiTxnId || 'N/A'}</div>
+                  <div><span className="text-zinc-500">Status:</span> <span className="font-bold text-amber-400">{viewRegModal.registrationStatus || viewRegModal.status}</span></div>
+                </div>
+
+                <div>
+                  <span className="text-zinc-500 font-mono">Address:</span> <p className="text-white mt-0.5">{viewRegModal.address || 'N/A'}</p>
+                </div>
+                <div>
+                  <span className="text-zinc-500 font-mono">Emergency Contact:</span> <p className="text-white mt-0.5">{viewRegModal.emergencyContactNumber || viewRegModal.emergencyContact || 'N/A'}</p>
+                </div>
+                <div>
+                  <span className="text-zinc-500 font-mono">Fitness Goal:</span> <p className="text-white mt-0.5">{viewRegModal.fitnessGoal || 'N/A'}</p>
+                </div>
+                {viewRegModal.adminRemarks && (
+                  <div>
+                    <span className="text-zinc-500 font-mono">Admin Remarks:</span> <p className="text-zinc-300 mt-0.5">{viewRegModal.adminRemarks}</p>
+                  </div>
                 )}
-                {!isStatusRejected(viewRegModal.registrationStatus || viewRegModal.status) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const reg = viewRegModal;
-                      setViewRegModal(null);
-                      setRejectRegModal(reg);
-                    }}
-                    disabled={
-                      processingId === getRegistrationReference(viewRegModal)
-                    }
-                    className="px-3 py-1.5 bg-red-950/60 border border-red-600/40 hover:bg-red-900/60 text-red-400 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    <XCircle className="w-3.5 h-3.5" />
-                    <span>
-                      {processingId === getRegistrationReference(viewRegModal)
-                        ? "Processing..."
-                        : "Reject"}
-                    </span>
-                  </button>
+                {viewRegModal.rejectionReason && (
+                  <div>
+                    <span className="text-red-400 font-mono">Rejection Reason:</span> <p className="text-red-300 mt-0.5">{viewRegModal.rejectionReason}</p>
+                  </div>
                 )}
               </div>
-              <button
-                onClick={() => setViewRegModal(null)}
-                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
+              <div className="pt-2 flex items-center justify-between border-t border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const reg = viewRegModal;
+                      setViewRegModal(null);
+                      setEditingRegistration(reg);
+                    }}
+                    className="px-3 py-1.5 bg-purple-900/40 hover:bg-purple-900/60 text-purple-300 border border-purple-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Edit / Restore</span>
+                  </button>
+                  {!isStatusApproved(viewRegModal.registrationStatus || viewRegModal.status) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const reg = viewRegModal;
+                        setViewRegModal(null);
+                        handleApproveRegistration(reg);
+                      }}
+                      disabled={
+                        processingId === getRegistrationReference(viewRegModal)
+                      }
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>
+                        {processingId === getRegistrationReference(viewRegModal)
+                          ? "Approving..."
+                          : "Approve"}
+                      </span>
+                    </button>
+                  )}
+                  {!isStatusRejected(viewRegModal.registrationStatus || viewRegModal.status) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const reg = viewRegModal;
+                        setViewRegModal(null);
+                        setRejectRegModal(reg);
+                      }}
+                      disabled={
+                        processingId === getRegistrationReference(viewRegModal)
+                      }
+                      className="px-3 py-1.5 bg-red-950/60 border border-red-600/40 hover:bg-red-900/60 text-red-400 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      <span>
+                        {processingId === getRegistrationReference(viewRegModal)
+                          ? "Processing..."
+                          : "Reject"}
+                      </span>
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={() => setViewRegModal(null)}
+                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* MODAL 3: Rejection Reason Dialog for Registration */}
-      {rejectRegModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-          <div className="relative max-w-md w-full bg-[#0F0F12] border border-red-500/30 rounded-3xl p-6 space-y-4 shadow-2xl">
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-              <XCircle className="w-5 h-5 text-red-500" />
-              Reject Registration: {rejectRegModal.registrationRef}
-            </h3>
+      <AnimatePresence>
+        {rejectRegModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 16 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              className="relative max-w-md w-full bg-[#0F0F12] border border-red-500/30 rounded-3xl p-6 space-y-4 shadow-2xl"
+            >
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <XCircle className="w-5 h-5 text-red-500" />
+                Reject Registration: {rejectRegModal.registrationRef}
+              </h3>
 
-            <p className="text-xs text-zinc-400">
-              Please enter the reason for rejecting {rejectRegModal.fullName}'s registration.
-            </p>
+              <p className="text-xs text-zinc-400">
+                Please enter the reason for rejecting {rejectRegModal.fullName}'s registration.
+              </p>
 
-            <textarea
-              value={rejectionReason}
-              onChange={(e) => setRejectionReason(e.target.value)}
-              placeholder="e.g. Invalid transaction reference / Payment screenshot unclear"
-              className="w-full h-24 p-3 bg-[#18181B] border border-zinc-700 rounded-xl text-xs text-white focus:outline-none focus:border-red-500"
-            />
+              <textarea
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="e.g. Invalid transaction reference / Payment screenshot unclear"
+                className="w-full h-24 p-3 bg-[#18181B] border border-zinc-700 rounded-xl text-xs text-white focus:outline-none focus:border-red-500"
+              />
 
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                onClick={() => setRejectRegModal(null)}
-                className="px-4 py-2 bg-zinc-800 text-zinc-300 rounded-xl text-xs font-bold"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmRejectRegistration}
-                disabled={Boolean(processingAction)}
-                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                {processingAction?.type === 'reject' ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Rejecting...</span>
-                  </>
-                ) : (
-                  <span>Confirm Rejection</span>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  onClick={() => setRejectRegModal(null)}
+                  className="px-4 py-2 bg-zinc-800 text-zinc-300 rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmRejectRegistration}
+                  disabled={Boolean(processingAction)}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {processingAction?.type === 'reject' ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Rejecting...</span>
+                    </>
+                  ) : (
+                    <span>Confirm Rejection</span>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* MODAL 4: Rejection Reason Dialog for Fee Payment */}
-      {rejectFeeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-          <div className="relative max-w-md w-full bg-[#0F0F12] border border-red-500/30 rounded-3xl p-6 space-y-4 shadow-2xl">
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-              <XCircle className="w-5 h-5 text-red-500" />
-              Reject Fee Payment: {rejectFeeModal.feeReferenceNumber}
-            </h3>
+      <AnimatePresence>
+        {rejectFeeModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 16 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              className="relative max-w-md w-full bg-[#0F0F12] border border-red-500/30 rounded-3xl p-6 space-y-4 shadow-2xl"
+            >
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <XCircle className="w-5 h-5 text-red-500" />
+                Reject Fee Payment: {rejectFeeModal.feeReferenceNumber}
+              </h3>
 
-            <p className="text-xs text-zinc-400">
-              Please enter the reason for rejecting fee payment for {rejectFeeModal.memberName}.
-            </p>
+              <p className="text-xs text-zinc-400">
+                Please enter the reason for rejecting fee payment for {rejectFeeModal.memberName}.
+              </p>
 
-            <textarea
-              value={feeRejectionReason}
-              onChange={(e) => setFeeRejectionReason(e.target.value)}
-              placeholder="e.g. Transaction ID mismatch with bank records"
-              className="w-full h-24 p-3 bg-[#18181B] border border-zinc-700 rounded-xl text-xs text-white focus:outline-none focus:border-red-500"
-            />
+              <textarea
+                value={feeRejectionReason}
+                onChange={(e) => setFeeRejectionReason(e.target.value)}
+                placeholder="e.g. Transaction ID mismatch with bank records"
+                className="w-full h-24 p-3 bg-[#18181B] border border-zinc-700 rounded-xl text-xs text-white focus:outline-none focus:border-red-500"
+              />
 
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                onClick={() => setRejectFeeModal(null)}
-                className="px-4 py-2 bg-zinc-800 text-zinc-300 rounded-xl text-xs font-bold"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmRejectFee}
-                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold"
-              >
-                Confirm Rejection
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  onClick={() => setRejectFeeModal(null)}
+                  className="px-4 py-2 bg-zinc-800 text-zinc-300 rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmRejectFee}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  Confirm Rejection
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Member Card Modal */}
       {cardModalMember && (
@@ -5167,303 +5422,328 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       )}
 
       {/* Edit Member Modal */}
-      {editingMember && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
-          <div className="bg-[#141419] border border-zinc-800 rounded-3xl p-6 max-w-xl w-full shadow-2xl space-y-6 my-8">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
-                  <Edit3 className="w-5 h-5 text-purple-400" />
+      <AnimatePresence>
+        {editingMember && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto"
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 16 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              className="bg-[#141419] border border-zinc-800 rounded-3xl p-6 max-w-xl w-full shadow-2xl space-y-6 my-8"
+            >
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
+                    <Edit3 className="w-5 h-5 text-purple-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white font-mono uppercase tracking-wide">
+                      EDIT MEMBER DETAILS
+                    </h3>
+                    <p className="text-xs text-zinc-400">
+                      Roll Number: <span className="font-mono text-purple-400 font-bold">{editingMember.rollNumber}</span>
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-base font-black text-white font-mono uppercase tracking-wide">
-                    EDIT MEMBER DETAILS
-                  </h3>
-                  <p className="text-xs text-zinc-400">
-                    Roll Number: <span className="font-mono text-purple-400 font-bold">{editingMember.rollNumber}</span>
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsEditModalOpen(false);
-                  setEditingMember(null);
-                }}
-                className="w-8 h-8 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {editMemberError && (
-              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs font-semibold flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{editMemberError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSaveMember} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Roll Number */}
-                <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Roll Number / Member ID *
-                  </label>
-                  <input
-                    type="text"
-                    value={editFormData.rollNumber}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, rollNumber: e.target.value }))}
-                    placeholder="e.g. ABG-26-0001"
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono font-bold"
-                    required
-                  />
-                </div>
-
-                {/* Full Name */}
-                <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Full Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={editFormData.fullName}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, fullName: e.target.value }))}
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
-                    required
-                  />
-                </div>
-
-                {/* Phone */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Phone Number
-                  </label>
-                  <input
-                    type="text"
-                    value={editFormData.phone}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, phone: e.target.value }))}
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
-                  />
-                </div>
-
-                {/* Email */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Email Address
-                  </label>
-                  <input
-                    type="email"
-                    value={editFormData.email}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, email: e.target.value }))}
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
-                  />
-                </div>
-
-                {/* Plan Name */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Selected Plan
-                  </label>
-                  <input
-                    type="text"
-                    list="edit-member-plans-list"
-                    value={editFormData.planName}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, planName: e.target.value }))}
-                    placeholder="e.g. Basic Plan"
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
-                  />
-                  <datalist id="edit-member-plans-list">
-                    {getStoredPlans().map((p: any) => (
-                      <option key={p.id || p.name} value={p.name} />
-                    ))}
-                  </datalist>
-                </div>
-
-                {/* Member Status */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Member Status
-                  </label>
-                  <select
-                    value={editFormData.status}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, status: e.target.value }))}
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-sans"
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Expired">Expired</option>
-                    <option value="Payment Due">Payment Due</option>
-                    <option value="Suspended">Suspended</option>
-                    <option value="Pending Activation">Pending Activation</option>
-                  </select>
-                </div>
-
-                {/* Joining Date */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Joining Date
-                  </label>
-                  <input
-                    type="date"
-                    value={editFormData.joiningDate}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, joiningDate: e.target.value }))}
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
-                  />
-                </div>
-
-                {/* Membership Expiry Date */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Membership Expiry Date
-                  </label>
-                  <input
-                    type="date"
-                    value={editFormData.membershipExpiry}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, membershipExpiry: e.target.value }))}
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
-                  />
-                </div>
-
-                {/* Gender */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Gender
-                  </label>
-                  <select
-                    value={editFormData.gender}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, gender: e.target.value }))}
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-sans"
-                  >
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-
-                {/* Date of Birth */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Date of Birth
-                  </label>
-                  <input
-                    type="date"
-                    value={editFormData.dob}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, dob: e.target.value }))}
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
-                  />
-                </div>
-
-                {/* Fitness Goal */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Fitness Goal
-                  </label>
-                  <input
-                    type="text"
-                    value={editFormData.fitnessGoal}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, fitnessGoal: e.target.value }))}
-                    placeholder="e.g. Muscle Gain, Weight Loss, General Fitness"
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
-                  />
-                </div>
-
-                {/* Medical Condition */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Medical Condition (if any)
-                  </label>
-                  <input
-                    type="text"
-                    value={editFormData.medicalCondition}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, medicalCondition: e.target.value }))}
-                    placeholder="e.g. None, Asthma, Knee injury"
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
-                  />
-                </div>
-
-                {/* Emergency Contact */}
-                <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Emergency Contact Number
-                  </label>
-                  <input
-                    type="text"
-                    value={editFormData.emergencyContact}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, emergencyContact: e.target.value }))}
-                    placeholder="e.g. +91 98765 43210 (Guardian/Contact)"
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
-                  />
-                </div>
-
-                {/* Address */}
-                <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Address
-                  </label>
-                  <input
-                    type="text"
-                    value={editFormData.address}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, address: e.target.value }))}
-                    placeholder="Full residential address"
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
-                  />
-                </div>
-
-                {/* Remarks / Notes */}
-                <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Remarks / Admin Notes
-                  </label>
-                  <input
-                    type="text"
-                    value={editFormData.remarks}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, remarks: e.target.value }))}
-                    placeholder="Special instructions or notes"
-                    className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
-                  />
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-800">
                 <button
                   type="button"
                   onClick={() => {
                     setIsEditModalOpen(false);
                     setEditingMember(null);
                   }}
-                  disabled={isUpdatingMember}
-                  className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition cursor-pointer"
+                  className="w-8 h-8 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isUpdatingMember}
-                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-black text-xs uppercase tracking-wider rounded-xl transition flex items-center gap-2 shadow-lg shadow-purple-600/20 cursor-pointer"
-                >
-                  {isUpdatingMember ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>Saving Changes...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4 text-white" />
-                      <span>Save Member Details</span>
-                    </>
-                  )}
+                  <X className="w-4 h-4" />
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+              {editMemberError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{editMemberError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveMember} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Roll Number */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Roll Number / Member ID *
+                    </label>
+                    <input
+                      type="text"
+                      value={editFormData.rollNumber}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, rollNumber: e.target.value }))}
+                      placeholder="e.g. ABG-26-0001"
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono font-bold"
+                      required
+                    />
+                  </div>
+
+                  {/* Full Name */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={editFormData.fullName}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, fullName: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                      required
+                    />
+                  </div>
+
+                  {/* Phone */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Phone Number
+                    </label>
+                    <input
+                      type="text"
+                      value={editFormData.phone}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, phone: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                    />
+                  </div>
+
+                  {/* Email */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      value={editFormData.email}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, email: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  {/* Plan Name */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Selected Plan
+                    </label>
+                    <input
+                      type="text"
+                      list="edit-member-plans-list"
+                      value={editFormData.planName}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, planName: e.target.value }))}
+                      placeholder="e.g. Basic Plan"
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                    />
+                    <datalist id="edit-member-plans-list">
+                      {getStoredPlans().map((p: any) => (
+                        <option key={p.id || p.name} value={p.name} />
+                      ))}
+                    </datalist>
+                  </div>
+
+                  {/* Member Status */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Member Status
+                    </label>
+                    <select
+                      value={editFormData.status}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, status: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-sans"
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Expired">Expired</option>
+                      <option value="Payment Due">Payment Due</option>
+                      <option value="Suspended">Suspended</option>
+                      <option value="Pending Activation">Pending Activation</option>
+                    </select>
+                  </div>
+
+                  {/* Joining Date */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Joining Date
+                    </label>
+                    <input
+                      type="date"
+                      value={editFormData.joiningDate}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, joiningDate: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                    />
+                  </div>
+
+                  {/* Membership Expiry Date */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Membership Expiry Date
+                    </label>
+                    <input
+                      type="date"
+                      value={editFormData.membershipExpiry}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, membershipExpiry: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                    />
+                  </div>
+
+                  {/* Gender */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Gender
+                    </label>
+                    <select
+                      value={editFormData.gender}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, gender: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-sans"
+                    >
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  {/* Date of Birth */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Date of Birth
+                    </label>
+                    <input
+                      type="date"
+                      value={editFormData.dob}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, dob: e.target.value }))}
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                    />
+                  </div>
+
+                  {/* Fitness Goal */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Fitness Goal
+                    </label>
+                    <input
+                      type="text"
+                      value={editFormData.fitnessGoal}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, fitnessGoal: e.target.value }))}
+                      placeholder="e.g. Muscle Gain, Weight Loss, General Fitness"
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  {/* Medical Condition */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Medical Condition (if any)
+                    </label>
+                    <input
+                      type="text"
+                      value={editFormData.medicalCondition}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, medicalCondition: e.target.value }))}
+                      placeholder="e.g. None, Asthma, Knee injury"
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  {/* Emergency Contact */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Emergency Contact Number
+                    </label>
+                    <input
+                      type="text"
+                      value={editFormData.emergencyContact}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, emergencyContact: e.target.value }))}
+                      placeholder="e.g. +91 98765 43210 (Guardian/Contact)"
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                    />
+                  </div>
+
+                  {/* Address */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Address
+                    </label>
+                    <input
+                      type="text"
+                      value={editFormData.address}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, address: e.target.value }))}
+                      placeholder="Full residential address"
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  {/* Remarks / Notes */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Remarks / Admin Notes
+                    </label>
+                    <input
+                      type="text"
+                      value={editFormData.remarks}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, remarks: e.target.value }))}
+                      placeholder="Special instructions or notes"
+                      className="w-full bg-[#0F0F12] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditModalOpen(false);
+                      setEditingMember(null);
+                    }}
+                    disabled={isUpdatingMember}
+                    className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isUpdatingMember}
+                    className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-black text-xs uppercase tracking-wider rounded-xl transition flex items-center gap-2 shadow-lg shadow-purple-600/20 cursor-pointer"
+                  >
+                    {isUpdatingMember ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                        <span>Saving Changes...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4 text-white" />
+                        <span>Save Member Details</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Edit & Restore Registration Modal */}
-      {editingRegistration && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
-          <div className="bg-[#141419] border border-zinc-800 rounded-3xl p-6 max-w-xl w-full shadow-2xl space-y-6 my-8">
+      <AnimatePresence>
+        {editingRegistration && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto"
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 16 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              className="bg-[#141419] border border-zinc-800 rounded-3xl p-6 max-w-xl w-full shadow-2xl space-y-6 my-8"
+            >
             <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
@@ -5671,9 +5951,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Direct Add / Member Restoration Form Modal */}
       {isDirectAddModalOpen && (

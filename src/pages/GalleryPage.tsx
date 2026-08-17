@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { getStoredGallery } from '../lib/storage';
 import { GalleryItem } from '../types';
 import { Image, Maximize2, X, Filter } from 'lucide-react';
+import { RevealOnScroll } from '../components/RevealOnScroll';
 
 export const GalleryPage: React.FC = () => {
   const gallery = getStoredGallery();
@@ -18,65 +19,75 @@ export const GalleryPage: React.FC = () => {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-12 text-zinc-100">
       {/* Header */}
-      <div className="text-center space-y-4 max-w-3xl mx-auto">
-        <span className="text-xs font-bold text-blue-500 uppercase tracking-widest flex items-center justify-center gap-1.5">
-          <Image className="w-4 h-4" />
-          Inside AB Gym
-        </span>
-        <h1 className="text-4xl sm:text-5xl font-black text-white font-mono uppercase tracking-tight">
-          GYM <span className="text-blue-500">GALLERY</span>
-        </h1>
-        <p className="text-sm text-zinc-400 leading-relaxed">
-          Take a virtual tour of our 20,000 sq. ft. high-performance training floor, heavy powerlifting equipment, cardio arenas, and inspiring member transformations.
-        </p>
-      </div>
+      <RevealOnScroll direction="up" delayMs={50}>
+        <div className="text-center space-y-4 max-w-3xl mx-auto">
+          <span className="text-xs font-bold text-blue-500 uppercase tracking-widest flex items-center justify-center gap-1.5">
+            <Image className="w-4 h-4" />
+            Inside AB Gym
+          </span>
+          <h1 className="text-4xl sm:text-5xl font-black text-white font-mono uppercase tracking-tight">
+            GYM <span className="text-blue-500">GALLERY</span>
+          </h1>
+          <p className="text-sm text-zinc-400 leading-relaxed">
+            Take a virtual tour of our 20,000 sq. ft. high-performance training floor, heavy powerlifting equipment, cardio arenas, and inspiring member transformations.
+          </p>
+        </div>
+      </RevealOnScroll>
 
       {/* Category Filter Pills */}
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        {categories.map((cat) => (
-          <button
-            key={cat}
-            onClick={() => setActiveCategory(cat)}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeCategory === cat
-                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                : 'bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800'
-            }`}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
+      <RevealOnScroll direction="up" delayMs={100}>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setActiveCategory(cat)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeCategory === cat
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
+                  : 'bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      </RevealOnScroll>
 
       {/* Photo Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-        {filteredItems.map((item) => (
-          <div
+        {filteredItems.map((item, idx) => (
+          <RevealOnScroll
             key={item.id}
-            onClick={() => setActiveLightbox(item)}
-            className="group relative h-72 rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-900 cursor-pointer shadow-xl"
+            direction="scale"
+            delayMs={(idx % 3) * 80 + Math.floor(idx / 3) * 50}
+            className="h-full"
           >
-            <img
-              src={item.imageUrl}
-              alt={item.title}
-              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
+            <div
+              onClick={() => setActiveLightbox(item)}
+              className="group relative h-72 rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-900 cursor-pointer shadow-xl"
+            >
+              <img
+                src={item.imageUrl}
+                alt={item.title}
+                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
 
-            <div className="absolute bottom-4 left-4 right-4 space-y-1">
-              <span className="px-2.5 py-0.5 rounded bg-blue-600 text-white text-[9px] font-bold uppercase tracking-wider">
-                {item.category}
-              </span>
-              <h3 className="text-base font-black text-white font-mono">{item.title}</h3>
-              {item.description && (
-                <p className="text-xs text-zinc-300 line-clamp-2">{item.description}</p>
-              )}
-            </div>
+              <div className="absolute bottom-4 left-4 right-4 space-y-1">
+                <span className="px-2.5 py-0.5 rounded bg-blue-600 text-white text-[9px] font-bold uppercase tracking-wider">
+                  {item.category}
+                </span>
+                <h3 className="text-base font-black text-white font-mono">{item.title}</h3>
+                {item.description && (
+                  <p className="text-xs text-zinc-300 line-clamp-2">{item.description}</p>
+                )}
+              </div>
 
-            <div className="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/60 border border-white/20 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-              <Maximize2 className="w-4 h-4" />
+              <div className="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/60 border border-white/20 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <Maximize2 className="w-4 h-4" />
+              </div>
             </div>
-          </div>
+          </RevealOnScroll>
         ))}
       </div>
 
@@ -92,7 +103,7 @@ export const GalleryPage: React.FC = () => {
           >
             <button
               onClick={() => setActiveLightbox(null)}
-              className="absolute top-4 right-4 z-10 p-2 rounded-full bg-black/70 text-white hover:bg-blue-600 transition-colors"
+              className="absolute top-4 right-4 z-10 p-2 rounded-full bg-black/70 text-white hover:bg-blue-600 transition-colors cursor-pointer"
             >
               <X className="w-6 h-6" />
             </button>
