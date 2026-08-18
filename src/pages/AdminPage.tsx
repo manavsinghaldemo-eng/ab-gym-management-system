@@ -79,6 +79,13 @@ import {
   Award,
   Wallet,
   Zap,
+  BellRing,
+  Send,
+  MessageSquare,
+  Timer,
+  CheckCheck,
+  Play,
+  Sliders,
 } from 'lucide-react';
 
 const getRegistrationReference = (registration: any) =>
@@ -570,6 +577,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     if (path.includes('/admin/fee-records')) return 'fee-records';
     if (path.includes('/admin/payment-history')) return 'payment-history';
     if (path.includes('/admin/attendance')) return 'attendance';
+    if (path.includes('/admin/reminders')) return 'reminders';
+    if (path.includes('/admin/settings')) return 'settings';
     return 'dashboard';
   };
 
@@ -689,6 +698,53 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
   const [receiptModalRecord, setReceiptModalRecord] = useState<FeePaymentRecord | null>(null);
   const [selectedMemberForDetails, setSelectedMemberForDetails] = useState<Member | null>(null);
   const [selectedPaymentForDetails, setSelectedPaymentForDetails] = useState<FeePaymentRecord | null>(null);
+
+  // Resend Receipt tracking
+  const [sentReceiptIds, setSentReceiptIds] = useState<Record<string, boolean>>({});
+  const [receiptSuccessToast, setReceiptSuccessToast] = useState<{
+    show: boolean;
+    email: string;
+    feeRef: string;
+  } | null>(null);
+
+  // Payment Reminders & Cron States
+  const [reminderFilter, setReminderFilter] = useState<'All' | 'Overdue' | 'Upcoming' | 'Balance'>('All');
+  const [reminderSearch, setReminderSearch] = useState('');
+  const [isSendingBatchReminders, setIsSendingBatchReminders] = useState(false);
+  const [batchReminderMode, setBatchReminderMode] = useState<string>('');
+  const [sentReminderMap, setSentReminderMap] = useState<Record<string, boolean>>({});
+  const [reminderSuccessToast, setReminderSuccessToast] = useState<{
+    show: boolean;
+    message: string;
+    count: number;
+    email?: string;
+  } | null>(null);
+  const [cronConfig, setCronConfig] = useState<{
+    enabled: boolean;
+    hour: number;
+    lastRun: string;
+    lastSentCount: number;
+    isSaving: boolean;
+    isRunningManual: boolean;
+    isConfigOpen: boolean;
+  }>({
+    enabled: true,
+    hour: 9,
+    lastRun: 'Today, 09:00 AM (Scheduled)',
+    lastSentCount: 0,
+    isSaving: false,
+    isRunningManual: false,
+    isConfigOpen: false,
+  });
+
+  useEffect(() => {
+    if (reminderSuccessToast?.show) {
+      const t = setTimeout(() => {
+        setReminderSuccessToast(null);
+      }, 5000);
+      return () => clearTimeout(t);
+    }
+  }, [reminderSuccessToast]);
 
   // Edit Member Modal State
   const [editingMember, setEditingMember] = useState<Member | null>(null);
@@ -2765,29 +2821,426 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       handleSessionExpired('Admin session expired. Please log in again.');
       return;
     }
-    if (!fee.feeReferenceNumber) {
-      alert('Fee Reference Number is required to resend receipt.');
+
+    const feeRef = (fee.feeReferenceNumber || (fee as any).feeRef || (fee as any).paymentRef || '').trim().toUpperCase();
+    const rollNo = (fee.rollNumber || (fee as any).rollNo || '').trim().toUpperCase();
+    const regRef = (fee.registrationRef || (fee as any).registrationReferenceNumber || '').trim().toUpperCase();
+    const memberName = (fee.memberName || (fee as any).fullName || 'Member').trim();
+    const feeType = ((fee as any).feeType || fee.selectedPlan || fee.planName || (fee as any).membershipPlan || 'Membership Plan Fee').trim();
+    const paymentDate = (fee.paymentDate || (fee as any).timestamp || (fee as any).createdAt || new Date().toISOString().split('T')[0]).trim();
+    const paymentMethod = (fee.paymentMethod || 'UPI').trim();
+    const amountPaid = Number(fee.amountPaid ?? (fee as any).currentFeeAmount ?? (fee as any).feeAmount ?? (fee as any).amount ?? 0);
+    const paymentStatus = (fee.paymentStatus || fee.status || 'Successful').trim();
+    const receiptNumber = (fee.receiptNumber || (fee as any).receiptNo || '').trim();
+
+    if (!feeRef && !rollNo && !regRef) {
+      alert('Payment transaction could not be found.');
       return;
     }
-    if (!window.confirm(`Are you sure you want to resend the verified fee receipt for ${fee.feeReferenceNumber} to ${fee.memberName || 'the member'}?`)) {
+
+    // Resolve member email address
+    let targetEmail = (fee.memberEmail || (fee as any).email || (fee as any).emailAddress || '').trim();
+    if (!targetEmail && rollNo) {
+      const matchM = members.find(m => (m.rollNumber || (m as any).rollNo || '').trim().toUpperCase() === rollNo);
+      if (matchM?.email) {
+        targetEmail = matchM.email.trim();
+      }
+    }
+    if (!targetEmail && regRef) {
+      const matchR = registrations.find(r => (r.registrationRef || (r as any).registrationReferenceNumber || '').trim().toUpperCase() === regRef);
+      if (matchR?.email) {
+        targetEmail = matchR.email.trim();
+      }
+    }
+
+    if (!targetEmail || !targetEmail.includes('@')) {
+      alert("Member email address is missing. Please update the member's email before resending the receipt.");
       return;
     }
-    setProcessingId(`resend-receipt-${fee.feeReferenceNumber}`);
+
+    const refKey = feeRef || rollNo || regRef;
+    setProcessingId(`resend-receipt-${refKey}`);
     try {
-      const res = await apiService.resendReceipt(fee.feeReferenceNumber, token);
-      if (res.success) {
-        alert(res.message || `Receipt resent successfully for ${fee.feeReferenceNumber}.`);
+      const currentAdminName = localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Admin';
+      const payload = {
+        feeReferenceNumber: feeRef,
+        paymentRef: feeRef,
+        rollNumber: rollNo,
+        registrationReferenceNumber: regRef,
+        registrationRef: regRef,
+        email: targetEmail,
+        memberEmail: targetEmail,
+        emailAddress: targetEmail,
+        memberName: memberName,
+        feeType: feeType,
+        selectedPlan: feeType,
+        planName: feeType,
+        amountPaid: amountPaid,
+        paymentAmount: amountPaid,
+        paymentDate: paymentDate,
+        paymentMethod: paymentMethod,
+        paymentStatus: paymentStatus,
+        receiptNumber: receiptNumber,
+        adminName: currentAdminName,
+      };
+
+      const res = await apiService.resendReceipt(payload, token);
+      if (res.success || res.status === 'success' || res.status === 'ok') {
+        // Mark as sent
+        setSentReceiptIds(prev => ({
+          ...prev,
+          [refKey]: true,
+          ...(feeRef ? { [feeRef]: true } : {}),
+          ...(rollNo ? { [rollNo]: true } : {}),
+        }));
+        setTimeout(() => {
+          setSentReceiptIds(prev => {
+            const next = { ...prev };
+            delete next[refKey];
+            if (feeRef) delete next[feeRef];
+            if (rollNo) delete next[rollNo];
+            return next;
+          });
+        }, 4000);
+
+        setReceiptSuccessToast({
+          show: true,
+          email: targetEmail,
+          feeRef: feeRef || refKey
+        });
+        setTimeout(() => {
+          setReceiptSuccessToast(null);
+        }, 5000);
       } else {
         if (res.code === 'SESSION_EXPIRED' || res.code === 'INVALID_TOKEN') {
           handleSessionExpired(res.message);
           return;
         }
-        alert(res.message || 'Failed to resend receipt.');
+        const errorMsg = res.message || 'Unable to send receipt. Please try again.';
+        alert(`Failed to send receipt. Please try again.\n\n${errorMsg}`);
       }
     } catch (err: any) {
-      alert(err.message || 'Error resending receipt.');
+      alert(`Unable to send receipt. Please try again.\n\n${err?.message || err}`);
     } finally {
       setProcessingId('');
+    }
+  };
+
+  // Analyze all members for dues, upcoming expirations & balances
+  const dueMembersAnalysis = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const list: Array<{
+      member: Member;
+      rollNumber: string;
+      fullName: string;
+      email: string;
+      phone: string;
+      planName: string;
+      membershipExpiry: string;
+      daysDiff: number | null;
+      isOverdue: boolean;
+      isUpcoming: boolean;
+      hasBalance: boolean;
+      dueType: 'OVERDUE' | 'UPCOMING' | 'BALANCE_DUE';
+      dueAmount: number;
+      badgeLabel: string;
+      badgeColor: string;
+    }> = [];
+
+    members.forEach((m) => {
+      const rollNumber = String(m.rollNumber || m.rollNo || '').trim().toUpperCase();
+      const fullName = String(m.fullName || m.name || 'Member').trim();
+      const email = String(m.email || m.emailAddress || '').trim();
+      const phone = String(m.phone || m.phoneNumber || '').trim();
+      const planName = String(m.planName || m.selectedPlan || 'Membership Plan').trim();
+      const expiryStr = String(m.membershipExpiry || m.expiryDate || m.planExpiryDate || '').trim();
+      const previousBalance = Number(m.previousBalance || 0);
+
+      let daysDiff: number | null = null;
+      let isOverdue = false;
+      let isUpcoming = false;
+
+      if (expiryStr) {
+        let expDate: Date | null = null;
+        if (/^\d{4}-\d{2}-\d{2}/.test(expiryStr)) {
+          expDate = new Date(expiryStr.substring(0, 10) + 'T00:00:00');
+        } else {
+          const parts = expiryStr.split(/[/-]/);
+          if (parts.length === 3) {
+            const d = parseInt(parts[0], 10);
+            const mon = parseInt(parts[1], 10) - 1;
+            const y = parseInt(parts[2], 10);
+            expDate = new Date(y, mon, d);
+          }
+        }
+
+        if (expDate && !isNaN(expDate.getTime())) {
+          daysDiff = Math.round((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          if (daysDiff < 0) {
+            isOverdue = true;
+          } else if (daysDiff <= 7) {
+            isUpcoming = true;
+          }
+        }
+      }
+
+      if (m.status === 'Expired' || m.status === 'Payment Due') {
+        isOverdue = true;
+      }
+
+      const hasBalance = previousBalance > 0;
+
+      if (isOverdue || isUpcoming || hasBalance) {
+        let dueType: 'OVERDUE' | 'UPCOMING' | 'BALANCE_DUE' = 'UPCOMING';
+        let badgeLabel = 'Due Soon';
+        let badgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/30';
+
+        if (isOverdue) {
+          dueType = 'OVERDUE';
+          badgeLabel = daysDiff !== null ? `Expired ${Math.abs(daysDiff)}d ago` : 'Overdue';
+          badgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/30';
+        } else if (hasBalance && !isUpcoming) {
+          dueType = 'BALANCE_DUE';
+          badgeLabel = `Balance Due`;
+          badgeColor = 'bg-purple-500/20 text-purple-300 border-purple-500/30';
+        } else if (isUpcoming) {
+          badgeLabel = daysDiff === 0 ? 'Expires Today' : daysDiff === 1 ? 'Expires Tomorrow' : `Expires in ${daysDiff}d`;
+        }
+
+        const dueAmount = hasBalance
+          ? previousBalance
+          : (Number(m.finalFeeAmount) || getPlanAmount(planName) || 999);
+
+        list.push({
+          member: m,
+          rollNumber,
+          fullName,
+          email,
+          phone,
+          planName,
+          membershipExpiry: expiryStr || 'Not Set',
+          daysDiff,
+          isOverdue,
+          isUpcoming,
+          hasBalance,
+          dueType,
+          dueAmount,
+          badgeLabel,
+          badgeColor,
+        });
+      }
+    });
+
+    const overdueCount = list.filter(i => i.isOverdue).length;
+    const upcomingCount = list.filter(i => i.isUpcoming && !i.isOverdue).length;
+    const balanceCount = list.filter(i => i.hasBalance && !i.isOverdue && !i.isUpcoming).length;
+    const totalDueAmount = list.reduce((acc, i) => acc + i.dueAmount, 0);
+
+    return {
+      all: list,
+      overdue: list.filter(i => i.isOverdue),
+      upcoming: list.filter(i => i.isUpcoming && !i.isOverdue),
+      balance: list.filter(i => i.hasBalance),
+      overdueCount,
+      upcomingCount,
+      balanceCount,
+      totalDueAmount,
+    };
+  }, [members]);
+
+  // Handler: Send Payment Reminders (Batch or Mode)
+  const handleSendBatchReminders = async (mode: 'all' | 'overdue' | 'upcoming' | 'balance' = 'all') => {
+    const token = getSavedAdminToken();
+    if (!token) {
+      handleSessionExpired('Admin session expired. Please log in again.');
+      return;
+    }
+
+    const targetList = mode === 'overdue'
+      ? dueMembersAnalysis.overdue
+      : mode === 'upcoming'
+      ? dueMembersAnalysis.upcoming
+      : mode === 'balance'
+      ? dueMembersAnalysis.balance
+      : dueMembersAnalysis.all;
+
+    if (targetList.length === 0) {
+      alert(`No members found with ${mode === 'all' ? 'active dues' : mode + ' status'}.`);
+      return;
+    }
+
+    const confirmMsg = `Send payment reminder emails to ${targetList.length} members with ${mode === 'all' ? 'upcoming/overdue dues' : mode + ' status'}?`;
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
+
+    setIsSendingBatchReminders(true);
+    setBatchReminderMode(mode);
+
+    try {
+      const currentAdminName = localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Admin';
+      const res = await apiService.sendPaymentReminders({
+        mode,
+        upcomingDays: 7,
+        adminName: currentAdminName,
+      }, token);
+
+      if (res && res.success !== false) {
+        // Mark all target roll numbers as sent
+        const newSentMap: Record<string, boolean> = { ...sentReminderMap };
+        targetList.forEach(item => {
+          if (item.rollNumber) newSentMap[item.rollNumber] = true;
+        });
+        setSentReminderMap(newSentMap);
+
+        confetti({
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.6 },
+        });
+
+        setReminderSuccessToast({
+          show: true,
+          message: res.message || `Payment reminders successfully sent to ${targetList.length} members.`,
+          count: targetList.length,
+        });
+
+        fetchActivityLogs();
+      } else {
+        alert(res?.message || 'Failed to dispatch payment reminders.');
+      }
+    } catch (err: any) {
+      alert(`Error sending payment reminders: ${err?.message || err}`);
+    } finally {
+      setIsSendingBatchReminders(false);
+      setBatchReminderMode('');
+    }
+  };
+
+  // Handler: Send Single Member Reminder Email
+  const handleSendSingleReminder = async (item: { rollNumber: string; fullName: string; email: string; planName: string; dueAmount: number; isOverdue: boolean }) => {
+    const token = getSavedAdminToken();
+    if (!token) {
+      handleSessionExpired('Admin session expired. Please log in again.');
+      return;
+    }
+
+    if (!item.email || !item.email.includes('@')) {
+      alert(`Member ${item.fullName} does not have a valid email address configured.`);
+      return;
+    }
+
+    const procKey = `reminder-${item.rollNumber}`;
+    setProcessingId(procKey);
+
+    try {
+      const currentAdminName = localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Admin';
+      const res = await apiService.sendSingleReminder(item.rollNumber, {
+        adminName: currentAdminName,
+      }, token);
+
+      if (res && res.success !== false) {
+        setSentReminderMap(prev => ({
+          ...prev,
+          [item.rollNumber]: true,
+        }));
+
+        setReminderSuccessToast({
+          show: true,
+          message: `Payment reminder email delivered to ${item.fullName} (${item.email}).`,
+          count: 1,
+          email: item.email,
+        });
+
+        fetchActivityLogs();
+      } else {
+        alert(res?.message || `Failed to send reminder to ${item.fullName}.`);
+      }
+    } catch (err: any) {
+      alert(`Error sending reminder to ${item.fullName}: ${err?.message || err}`);
+    } finally {
+      setProcessingId('');
+    }
+  };
+
+  // Handler: Open WhatsApp reminder for a member
+  const handleOpenWhatsAppReminder = (item: { fullName: string; phone: string; planName: string; dueAmount: number; membershipExpiry: string; isOverdue: boolean }) => {
+    const rawPhone = item.phone.replace(/\D/g, '');
+    if (!rawPhone || rawPhone.length < 10) {
+      alert(`Member ${item.fullName} does not have a valid 10-digit mobile number.`);
+      return;
+    }
+    const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+    const expiryText = item.isOverdue ? 'has expired and is overdue' : `expires on ${item.membershipExpiry}`;
+    const message = `Hello ${item.fullName},\n\nThis is a friendly reminder from AB Fitness Gym. Your ${item.planName} membership ${expiryText}.\n\n💰 Outstanding / Renewal Due: ₹${item.dueAmount.toLocaleString('en-IN')}\n\nTo continue your workout routines uninterrupted, you can pay directly via UPI (${settings.upiId || AB_FITNESS_UPI_ID}) or visit the front desk.\n\nThank you,\nAB Gym Team 💪`;
+
+    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
+  };
+
+  // Handler: Configure Automated Cron Job
+  const handleToggleCron = async (enable: boolean) => {
+    const token = getSavedAdminToken();
+    if (!token) {
+      handleSessionExpired('Admin session expired. Please log in again.');
+      return;
+    }
+
+    setCronConfig(prev => ({ ...prev, isSaving: true }));
+    try {
+      const currentAdminName = localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Admin';
+      const res = await apiService.configureReminderCron({
+        enable,
+        hour: cronConfig.hour,
+        adminName: currentAdminName,
+      }, token);
+
+      if (res && res.success !== false) {
+        setCronConfig(prev => ({
+          ...prev,
+          enabled: enable,
+          lastRun: enable ? `Scheduled daily at ${cronConfig.hour}:00 AM IST` : 'Disabled',
+        }));
+        alert(res.message || `Automated payment reminder cron ${enable ? 'enabled' : 'disabled'} successfully.`);
+      } else {
+        alert(res?.message || 'Failed to update cron configuration.');
+      }
+    } catch (err: any) {
+      alert(`Error updating cron configuration: ${err?.message || err}`);
+    } finally {
+      setCronConfig(prev => ({ ...prev, isSaving: false }));
+    }
+  };
+
+  const handleSaveCronHour = async (newHour: number) => {
+    const token = getSavedAdminToken();
+    if (!token) {
+      handleSessionExpired('Admin session expired. Please log in again.');
+      return;
+    }
+
+    setCronConfig(prev => ({ ...prev, hour: newHour, isSaving: true }));
+    try {
+      const currentAdminName = localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Admin';
+      const res = await apiService.configureReminderCron({
+        enable: cronConfig.enabled,
+        hour: newHour,
+        adminName: currentAdminName,
+      }, token);
+
+      if (res && res.success !== false) {
+        setCronConfig(prev => ({
+          ...prev,
+          hour: newHour,
+          lastRun: `Scheduled daily at ${newHour}:00 AM IST`,
+        }));
+        alert(`Cron trigger updated to run daily at ${newHour > 12 ? `${newHour - 12}:00 PM` : `${newHour}:00 AM`} IST.`);
+      }
+    } catch (err: any) {
+      alert(`Error updating cron hour: ${err?.message || err}`);
+    } finally {
+      setCronConfig(prev => ({ ...prev, isSaving: false }));
     }
   };
 
@@ -3351,6 +3804,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               { id: 'members', label: 'Members', icon: Users, count: members.length, countColor: 'bg-zinc-800 text-zinc-300 border-zinc-700', path: '/admin/members' },
               { id: 'fee-records', label: 'Fee Payments', icon: CreditCard, count: feePayments.filter(f => f.status === 'Pending Verification').length, countColor: 'bg-amber-500/20 text-amber-400 border-amber-500/40', path: '/admin/fee-records' },
               { id: 'payment-history', label: 'Payment Ledger', icon: History, count: feePayments.length, countColor: 'bg-zinc-800 text-zinc-300 border-zinc-700', path: '/admin/payment-history' },
+              { id: 'reminders', label: 'Payment Reminders', icon: BellRing, count: dueMembersAnalysis.all.length, countColor: 'bg-rose-500/20 text-rose-300 border-rose-500/40', path: '/admin/reminders' },
               { id: 'attendance', label: 'QR Attendance', icon: QrCode, count: attendanceRecords.filter(a => a.date === new Date().toISOString().split('T')[0]).length, countColor: 'bg-blue-500/20 text-blue-400 border-blue-500/40', path: '/admin/attendance' },
             ].map((tab) => {
               const Icon = tab.icon;
@@ -3758,6 +4212,92 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                     </table>
                   </div>
                 </motion.div>
+              </div>
+
+              {/* Payment Dues & Reminder Automation Quick Widget */}
+              <div className="bg-[#0F0F14] border border-zinc-800/80 rounded-3xl p-6 shadow-xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                      <BellRing className="w-5 h-5 animate-pulse" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                        <span>Payment Reminders & Expiry Tracker</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                          {dueMembersAnalysis.all.length} Due
+                        </span>
+                      </h3>
+                      <p className="text-xs text-zinc-400">
+                        {dueMembersAnalysis.overdueCount} overdue members • {dueMembersAnalysis.upcomingCount} expiring within 7 days • Daily Cron: {cronConfig.enabled ? `Active (${cronConfig.hour}:00 AM IST)` : 'Paused'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleTabChange('reminders')}
+                      className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <span>Open Reminders Tab</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isSendingBatchReminders || dueMembersAnalysis.all.length === 0}
+                      onClick={() => handleSendBatchReminders('all')}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-lg shadow-rose-950/40 disabled:opacity-50"
+                    >
+                      {isSendingBatchReminders && batchReminderMode === 'all' ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Sending...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Send All Reminders</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {dueMembersAnalysis.all.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                    {dueMembersAnalysis.all.slice(0, 3).map((dueItem) => (
+                      <div
+                        key={dueItem.rollNumber}
+                        className="p-3.5 bg-zinc-950/60 border border-zinc-800 rounded-2xl flex items-center justify-between text-xs font-sans"
+                      >
+                        <div className="space-y-0.5 truncate">
+                          <div className="font-bold text-white truncate">{dueItem.fullName}</div>
+                          <div className="text-[11px] text-zinc-400 font-mono flex items-center gap-1.5">
+                            <span className="text-red-400 font-bold">{dueItem.rollNumber}</span>
+                            <span>•</span>
+                            <span className={dueItem.isOverdue ? 'text-rose-400 font-bold' : 'text-amber-400'}>
+                              {dueItem.badgeLabel}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0 pl-2">
+                          <div className="font-bold text-white font-mono">₹{dueItem.dueAmount.toLocaleString('en-IN')}</div>
+                          <button
+                            type="button"
+                            onClick={() => handleSendSingleReminder(dueItem)}
+                            disabled={processingId === `reminder-${dueItem.rollNumber}`}
+                            className="mt-1 text-[10px] font-bold text-rose-400 hover:text-rose-300 flex items-center gap-0.5 justify-end"
+                          >
+                            <Mail className="w-2.5 h-2.5" />
+                            <span>Remind</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
@@ -4567,14 +5107,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleApproveFeePayment(payment);
+                                      handleApproveFeePayment(fee);
                                     }}
                                     disabled={
-                                      processingId === getFeeReferenceNumber(payment)
+                                      processingId === getFeeReferenceNumber(fee)
                                     }
                                     className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer shadow-lg shadow-emerald-600/20"
                                   >
-                                    {processingId === getFeeReferenceNumber(payment) ? (
+                                    {processingId === getFeeReferenceNumber(fee) ? (
                                       <>
                                         <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
                                         <span>Approving...</span>
@@ -4590,23 +5130,40 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
                                 {isStatusApproved(statusVal) && (
                                   <motion.button
-                                    whileHover={{ scale: 1.05 }}
-                                    whileTap={{ scale: 0.95 }}
+                                    whileHover={{ scale: 1.03 }}
+                                    whileTap={{ scale: 0.97 }}
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleResendReceipt(fee);
                                     }}
-                                    disabled={processingId === `resend-receipt-${feeRef}`}
-                                    className="px-2.5 py-1.5 bg-blue-950/60 border border-blue-500/30 hover:bg-blue-900/60 text-blue-400 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
-                                    title="Resend Verified Receipt"
+                                    disabled={
+                                      processingId === `resend-receipt-${feeRef}` ||
+                                      Boolean(sentReceiptIds[feeRef] || sentReceiptIds[fee.rollNumber || ''])
+                                    }
+                                    className={`px-2.5 py-1.5 border font-bold text-xs flex items-center gap-1 rounded-lg transition-all cursor-pointer disabled:opacity-75 ${
+                                      sentReceiptIds[feeRef] || sentReceiptIds[fee.rollNumber || '']
+                                        ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                                        : 'bg-blue-950/60 border-blue-500/30 hover:bg-blue-900/60 text-blue-400'
+                                    }`}
+                                    title="Resend Verified Receipt to Member Email"
                                   >
                                     {processingId === `resend-receipt-${feeRef}` ? (
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>SENDING...</span>
+                                      </>
+                                    ) : sentReceiptIds[feeRef] || sentReceiptIds[fee.rollNumber || ''] ? (
+                                      <>
+                                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                        <span className="text-emerald-300">✓ RECEIPT SENT</span>
+                                      </>
                                     ) : (
-                                      <Mail className="w-3.5 h-3.5" />
+                                      <>
+                                        <Mail className="w-3.5 h-3.5" />
+                                        <span>RESEND RECEIPT</span>
+                                      </>
                                     )}
-                                    <span>Resend Receipt</span>
                                   </motion.button>
                                 )}
 
@@ -4617,14 +5174,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      setRejectFeeModal(payment);
+                                      setRejectFeeModal(fee);
                                     }}
                                     disabled={
-                                      processingId === getFeeReferenceNumber(payment)
+                                      processingId === getFeeReferenceNumber(fee)
                                     }
                                     className="px-2.5 py-1.5 bg-red-950/60 border border-red-600/40 hover:bg-red-900/60 disabled:opacity-50 disabled:cursor-not-allowed text-red-400 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer"
                                   >
-                                    {processingId === getFeeReferenceNumber(payment) ? (
+                                    {processingId === getFeeReferenceNumber(fee) ? (
                                       <>
                                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                                         <span>Processing...</span>
@@ -4960,6 +5517,43 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                                   <span>Receipt</span>
                                 </button>
 
+                                {isApproved && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleResendReceipt(record);
+                                    }}
+                                    disabled={
+                                      processingId === `resend-receipt-${record.feeReferenceNumber}` ||
+                                      Boolean(sentReceiptIds[record.feeReferenceNumber || ''] || sentReceiptIds[record.rollNumber || ''])
+                                    }
+                                    className={`px-2.5 py-1.5 border font-bold text-xs flex items-center gap-1 rounded-lg transition-all cursor-pointer disabled:opacity-75 ${
+                                      sentReceiptIds[record.feeReferenceNumber || ''] || sentReceiptIds[record.rollNumber || '']
+                                        ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                                        : 'bg-blue-950/60 border-blue-500/30 hover:bg-blue-900/60 text-blue-400'
+                                    }`}
+                                    title="Resend Receipt Email"
+                                  >
+                                    {processingId === `resend-receipt-${record.feeReferenceNumber}` ? (
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>SENDING...</span>
+                                      </>
+                                    ) : sentReceiptIds[record.feeReferenceNumber || ''] || sentReceiptIds[record.rollNumber || ''] ? (
+                                      <>
+                                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                        <span className="text-emerald-300">✓ SENT</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Mail className="w-3.5 h-3.5" />
+                                        <span>Resend</span>
+                                      </>
+                                    )}
+                                  </button>
+                                )}
+
                                 {/* Screenshot Button if available */}
                                 {screenshotUrl && (
                                   <button
@@ -5112,6 +5706,483 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                           </td>
                         </tr>
                       ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* TAB: PAYMENT REMINDERS & DUE TRACKER */}
+        {activeTab === 'reminders' && (
+          <motion.div
+            key="reminders"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -14 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            className="space-y-6"
+          >
+            {/* Header & Batch Trigger Card */}
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#0F1016] via-[#16121D] to-[#120F16] border border-zinc-800/80 p-6 sm:p-8 shadow-2xl">
+              <div className="absolute top-0 right-0 w-80 h-80 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-0 left-1/4 w-60 h-60 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+
+              <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[11px] font-bold font-mono uppercase tracking-wide flex items-center gap-1.5">
+                      <BellRing className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                      Payment Reminder Automation
+                    </span>
+                    <span className="text-zinc-500 text-xs font-mono">•</span>
+                    <span className="text-zinc-400 text-xs font-mono">
+                      {cronConfig.enabled ? 'Daily Cron: Active' : 'Daily Cron: Paused'}
+                    </span>
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight font-sans">
+                    Due Payments & Renewal Reminders
+                  </h2>
+                  <p className="text-xs sm:text-sm text-zinc-400 max-w-2xl leading-relaxed">
+                    Track members with upcoming membership expiry (within 7 days) and overdue balance dues. Send instant personalized email and WhatsApp notifications, or configure automated daily cron triggers.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 shrink-0">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setCronConfig(prev => ({ ...prev, isConfigOpen: !prev.isConfigOpen }))}
+                    className="px-4 py-3 bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer shadow-md"
+                  >
+                    <Sliders className="w-4 h-4 text-amber-400" />
+                    <span>{cronConfig.isConfigOpen ? 'Hide Cron Setup' : 'Cron Schedule'}</span>
+                  </motion.button>
+
+                  <motion.button
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    disabled={isSendingBatchReminders || dueMembersAnalysis.all.length === 0}
+                    onClick={() => handleSendBatchReminders('all')}
+                    className="px-5 py-3 bg-gradient-to-r from-rose-600 via-red-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-rose-950/50 cursor-pointer disabled:opacity-50 transition-all"
+                  >
+                    {isSendingBatchReminders && batchReminderMode === 'all' ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Sending Reminders...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        <span>Send Reminders to All ({dueMembersAnalysis.all.length})</span>
+                      </>
+                    )}
+                  </motion.button>
+                </div>
+              </div>
+            </div>
+
+            {/* KPI Summary Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Card 1: Overdue Members */}
+              <div className="bg-[#0F0F12] border border-rose-500/30 rounded-2xl p-5 shadow-lg relative overflow-hidden group">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider font-mono">Overdue Members</span>
+                  <div className="w-8 h-8 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
+                    <AlertCircle className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-2xl sm:text-3xl font-black text-white font-mono">{dueMembersAnalysis.overdueCount}</span>
+                  <span className="text-xs text-rose-300 font-semibold font-sans">Athletes</span>
+                </div>
+                <div className="mt-2 text-xs text-zinc-400 flex items-center justify-between pt-2 border-t border-zinc-800/80">
+                  <span>Est. Overdue:</span>
+                  <span className="font-bold text-rose-300 font-mono">
+                    ₹{dueMembersAnalysis.overdue.reduce((acc, i) => acc + i.dueAmount, 0).toLocaleString('en-IN')}
+                  </span>
+                </div>
+              </div>
+
+              {/* Card 2: Expiring Within 7 Days */}
+              <div className="bg-[#0F0F12] border border-amber-500/30 rounded-2xl p-5 shadow-lg relative overflow-hidden group">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider font-mono">Expiring (≤7 Days)</span>
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                    <Clock className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-2xl sm:text-3xl font-black text-white font-mono">{dueMembersAnalysis.upcomingCount}</span>
+                  <span className="text-xs text-amber-300 font-semibold font-sans">Athletes</span>
+                </div>
+                <div className="mt-2 text-xs text-zinc-400 flex items-center justify-between pt-2 border-t border-zinc-800/80">
+                  <span>Upcoming Renewals:</span>
+                  <span className="font-bold text-amber-300 font-mono">
+                    ₹{dueMembersAnalysis.upcoming.reduce((acc, i) => acc + i.dueAmount, 0).toLocaleString('en-IN')}
+                  </span>
+                </div>
+              </div>
+
+              {/* Card 3: Total Outstanding Due Balance */}
+              <div className="bg-[#0F0F12] border border-emerald-500/30 rounded-2xl p-5 shadow-lg relative overflow-hidden group">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider font-mono">Total Outstanding Dues</span>
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                    <IndianRupee className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono">
+                    ₹{dueMembersAnalysis.totalDueAmount.toLocaleString('en-IN')}
+                  </span>
+                </div>
+                <div className="mt-2 text-xs text-zinc-400 flex items-center justify-between pt-2 border-t border-zinc-800/80">
+                  <span>Across all categories:</span>
+                  <span className="font-bold text-zinc-200 font-mono">{dueMembersAnalysis.all.length} Total</span>
+                </div>
+              </div>
+
+              {/* Card 4: Automated Cron Trigger Status */}
+              <div className="bg-[#0F0F12] border border-blue-500/30 rounded-2xl p-5 shadow-lg relative overflow-hidden group">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-blue-400 uppercase tracking-wider font-mono">Daily Cron Schedule</span>
+                  <div className="w-8 h-8 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                    <Timer className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <span className={`w-2.5 h-2.5 rounded-full ${cronConfig.enabled ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'}`} />
+                  <span className="text-sm font-black text-white font-mono">
+                    {cronConfig.enabled ? `${cronConfig.hour}:00 AM IST` : 'Disabled'}
+                  </span>
+                </div>
+                <div className="mt-2 text-xs text-zinc-400 flex items-center justify-between pt-2 border-t border-zinc-800/80">
+                  <span className="truncate">Status:</span>
+                  <span className={`font-bold font-mono ${cronConfig.enabled ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                    {cronConfig.enabled ? 'Active (Automatic)' : 'Manual Only'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Collapsible Cron Job Configuration Card */}
+            <AnimatePresence>
+              {cronConfig.isConfigOpen && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="bg-[#0C0D14] border border-amber-500/30 rounded-3xl p-6 shadow-xl space-y-5 overflow-hidden"
+                >
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-800 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                        <Timer className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
+                          Google Apps Script Automated Cron Job Engine
+                        </h3>
+                        <p className="text-xs text-zinc-400">
+                          Automated time-driven triggers run directly inside Google Apps Script (Cloud) without requiring an open browser tab.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <label className="text-xs text-zinc-300 font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer">
+                        <span>Daily Auto Trigger:</span>
+                        <input
+                          type="checkbox"
+                          checked={cronConfig.enabled}
+                          onChange={(e) => handleToggleCron(e.target.checked)}
+                          disabled={cronConfig.isSaving}
+                          className="w-5 h-5 rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-emerald-500 cursor-pointer"
+                        />
+                        <span className={`text-xs font-mono font-bold ${cronConfig.enabled ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                          {cronConfig.enabled ? 'ENABLED' : 'PAUSED'}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-zinc-300 uppercase">Daily Scheduled Run Time (IST)</label>
+                      <select
+                        value={cronConfig.hour}
+                        onChange={(e) => handleSaveCronHour(Number(e.target.value))}
+                        disabled={!cronConfig.enabled || cronConfig.isSaving}
+                        className="w-full px-3.5 py-2.5 bg-[#18181B] border border-zinc-700 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-amber-500 disabled:opacity-50"
+                      >
+                        <option value={7}>07:00 AM IST (Early Morning)</option>
+                        <option value={8}>08:00 AM IST (Morning Opening)</option>
+                        <option value={9}>09:00 AM IST (Recommended)</option>
+                        <option value={10}>10:00 AM IST (Mid-Morning)</option>
+                        <option value={11}>11:00 AM IST (Late Morning)</option>
+                        <option value={18}>06:00 PM IST (Evening Batch)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-zinc-300 uppercase">Reminder Criteria Window</label>
+                      <div className="px-3.5 py-2.5 bg-zinc-950/60 border border-zinc-800 rounded-xl text-xs text-zinc-300 font-mono">
+                        Overdue + Next 7 Days Expiry
+                      </div>
+                    </div>
+
+                    <div className="space-y-1 md:text-right">
+                      <label className="text-xs font-bold text-zinc-400 uppercase block">Manual Execution</label>
+                      <button
+                        type="button"
+                        onClick={() => handleSendBatchReminders('all')}
+                        disabled={isSendingBatchReminders || dueMembersAnalysis.all.length === 0}
+                        className="w-full md:w-auto px-4 py-2.5 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        <span>Run Cron Batch Now</span>
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Filter & Search Bar */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[#0F0F12] border border-zinc-800/80 p-4 rounded-3xl shadow-xl">
+              <div className="flex flex-wrap items-center gap-2">
+                {[
+                  { id: 'All', label: 'All Due', count: dueMembersAnalysis.all.length, color: 'text-white' },
+                  { id: 'Overdue', label: 'Overdue Only', count: dueMembersAnalysis.overdueCount, color: 'text-rose-400' },
+                  { id: 'Upcoming', label: 'Expiring in ≤7 Days', count: dueMembersAnalysis.upcomingCount, color: 'text-amber-400' },
+                  { id: 'Balance', label: 'Balance Dues', count: dueMembersAnalysis.balanceCount, color: 'text-purple-400' },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setReminderFilter(f.id as any)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
+                      reminderFilter === f.id
+                        ? 'bg-zinc-800 text-white border border-zinc-600 shadow-md'
+                        : 'bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 border border-zinc-800/60'
+                    }`}
+                  >
+                    <span className={reminderFilter === f.id ? f.color : 'text-zinc-300'}>{f.label}</span>
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-zinc-950/80 border border-zinc-700 text-zinc-300">
+                      {f.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <div className="relative flex-1 md:w-64">
+                  <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={reminderSearch}
+                    onChange={(e) => setReminderSearch(e.target.value)}
+                    placeholder="Search Roll, Name, Phone, Email..."
+                    className="w-full pl-10 pr-4 py-2 bg-[#050505] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-rose-500"
+                  />
+                  {reminderSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setReminderSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {reminderFilter !== 'All' && (
+                  <button
+                    type="button"
+                    disabled={isSendingBatchReminders || dueMembersAnalysis[reminderFilter.toLowerCase() as 'overdue' | 'upcoming' | 'balance'].length === 0}
+                    onClick={() => handleSendBatchReminders(reminderFilter.toLowerCase() as any)}
+                    className="px-3.5 py-2 bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Send to Filtered ({dueMembersAnalysis[reminderFilter.toLowerCase() as 'overdue' | 'upcoming' | 'balance'].length})</span>
+                    <span className="sm:hidden">Send Filtered</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Due Members Table */}
+            <div className="bg-[#0F0F12] border border-zinc-800/80 rounded-3xl overflow-hidden shadow-2xl">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-[#141419] border-b border-zinc-800 text-zinc-400 font-bold uppercase tracking-wider text-[10px] font-mono">
+                      <th className="py-3.5 px-4">Member Info</th>
+                      <th className="py-3.5 px-4">Contact Details</th>
+                      <th className="py-3.5 px-4">Plan &amp; Expiry Status</th>
+                      <th className="py-3.5 px-4">Due Amount</th>
+                      <th className="py-3.5 px-4">Due Category</th>
+                      <th className="py-3.5 px-4 text-right">Reminder Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/60 text-zinc-300 font-mono">
+                    {dueMembersAnalysis.all.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-16 text-center text-zinc-500 font-sans">
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <CheckCircle2 className="w-8 h-8 text-emerald-500/60" />
+                            <p className="font-bold text-sm text-zinc-300">All member accounts are fully settled!</p>
+                            <p className="text-xs text-zinc-500">No overdue balances or expirations within the next 7 days.</p>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      dueMembersAnalysis.all
+                        .filter((item) => {
+                          const query = reminderSearch.trim().toLowerCase();
+                          const matchesSearch =
+                            !query ||
+                            item.rollNumber.toLowerCase().includes(query) ||
+                            item.fullName.toLowerCase().includes(query) ||
+                            item.phone.toLowerCase().includes(query) ||
+                            item.email.toLowerCase().includes(query) ||
+                            item.planName.toLowerCase().includes(query);
+
+                          const matchesFilter =
+                            reminderFilter === 'All' ||
+                            (reminderFilter === 'Overdue' && item.isOverdue) ||
+                            (reminderFilter === 'Upcoming' && item.isUpcoming && !item.isOverdue) ||
+                            (reminderFilter === 'Balance' && item.hasBalance);
+
+                          return matchesSearch && matchesFilter;
+                        })
+                        .map((item) => {
+                          const isSent = Boolean(sentReminderMap[item.rollNumber]);
+                          const isProcessing = processingId === `reminder-${item.rollNumber}`;
+
+                          return (
+                            <tr
+                              key={item.rollNumber || item.member.id}
+                              className="hover:bg-zinc-800/40 transition-colors group"
+                            >
+                              {/* Member Info */}
+                              <td className="py-3.5 px-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center font-bold text-white text-xs shrink-0 uppercase">
+                                    {item.fullName.slice(0, 2)}
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-white font-sans text-xs group-hover:text-emerald-300 transition-colors">
+                                      {item.fullName}
+                                    </div>
+                                    <div className="text-[11px] font-mono text-zinc-400 font-bold flex items-center gap-1.5">
+                                      <span>{item.rollNumber || 'Unassigned'}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Contact Details */}
+                              <td className="py-3.5 px-4">
+                                <div className="space-y-0.5 text-xs font-sans">
+                                  <div className="flex items-center gap-1 text-zinc-300">
+                                    <Mail className="w-3 h-3 text-zinc-500 shrink-0" />
+                                    <span className="truncate max-w-[180px]">{item.email || 'No email provided'}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 text-zinc-400">
+                                    <span className="text-zinc-500 text-[10px]">📞</span>
+                                    <span>{item.phone || 'No phone provided'}</span>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Plan & Expiry */}
+                              <td className="py-3.5 px-4">
+                                <div>
+                                  <div className="text-xs font-bold text-zinc-200 font-sans">{item.planName}</div>
+                                  <div className="text-[11px] text-zinc-400 mt-0.5 flex items-center gap-1.5">
+                                    <Calendar className="w-3 h-3 text-zinc-500" />
+                                    <span>Expiry: {item.membershipExpiry}</span>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Due Amount */}
+                              <td className="py-3.5 px-4 font-bold text-white">
+                                <span className={`text-sm font-mono ${item.isOverdue ? 'text-rose-400' : 'text-amber-400'}`}>
+                                  ₹{item.dueAmount.toLocaleString('en-IN')}
+                                </span>
+                              </td>
+
+                              {/* Due Category Badge */}
+                              <td className="py-3.5 px-4">
+                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border font-sans uppercase tracking-wider inline-flex items-center gap-1 ${item.badgeColor}`}>
+                                  {item.isOverdue && <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />}
+                                  {item.badgeLabel}
+                                </span>
+                              </td>
+
+                              {/* Actions */}
+                              <td className="py-3.5 px-4 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {/* Send Email Reminder Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSendSingleReminder(item)}
+                                    disabled={isProcessing || isSent}
+                                    className={`px-2.5 py-1.5 border font-bold text-xs flex items-center gap-1 rounded-lg transition-all cursor-pointer disabled:opacity-75 ${
+                                      isSent
+                                        ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                                        : 'bg-rose-950/50 border-rose-500/40 hover:bg-rose-900/60 text-rose-300'
+                                    }`}
+                                    title="Send payment reminder email"
+                                  >
+                                    {isProcessing ? (
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>Sending...</span>
+                                      </>
+                                    ) : isSent ? (
+                                      <>
+                                        <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
+                                        <span>✓ Sent</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Mail className="w-3.5 h-3.5" />
+                                        <span>Email</span>
+                                      </>
+                                    )}
+                                  </button>
+
+                                  {/* WhatsApp Reminder Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenWhatsAppReminder(item)}
+                                    className="px-2.5 py-1.5 bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/30 text-emerald-400 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                                    title="Open WhatsApp Reminder Message"
+                                  >
+                                    <MessageSquare className="w-3.5 h-3.5" />
+                                    <span>WhatsApp</span>
+                                  </button>
+
+                                  {/* Collect Fee Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenAddFeeForMember(item.member)}
+                                    className="px-2.5 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                                    title="Record payment for this member"
+                                  >
+                                    <CreditCard className="w-3.5 h-3.5" />
+                                    <span>Pay Fee</span>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
                     )}
                   </tbody>
                 </table>
@@ -5690,6 +6761,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
             setSelectedPaymentForDetails(null);
             handleOpenAddFeeForMember(m);
           }}
+          onResendReceipt={(rec) => {
+            handleResendReceipt(rec);
+          }}
+          isResendingReceipt={
+            processingId === `resend-receipt-${selectedPaymentForDetails.feeReferenceNumber || (selectedPaymentForDetails as any).feeRef || (selectedPaymentForDetails as any).paymentRef || selectedPaymentForDetails.rollNumber}`
+          }
+          receiptSent={Boolean(
+            sentReceiptIds[selectedPaymentForDetails.feeReferenceNumber || ''] ||
+            sentReceiptIds[(selectedPaymentForDetails as any).feeRef || ''] ||
+            sentReceiptIds[(selectedPaymentForDetails as any).paymentRef || ''] ||
+            sentReceiptIds[selectedPaymentForDetails.rollNumber || '']
+          )}
         />
       )}
 
@@ -5709,6 +6792,33 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
           onClose={() => setReceiptModalRecord(null)}
           onDownload={() => downloadFeeReceiptPDF(receiptModalRecord, settings)}
         />
+      )}
+
+      {/* Resend Receipt Success Confirmation Toast / Modal */}
+      {receiptSuccessToast && receiptSuccessToast.show && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-md bg-slate-900 border border-emerald-500/50 text-white rounded-2xl p-4 shadow-2xl shadow-emerald-950/60 flex items-start gap-3.5 animate-in fade-in slide-in-from-bottom-5">
+          <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0 mt-0.5 text-emerald-400">
+            <CheckCircle2 className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+              <span>Receipt sent successfully</span>
+            </h4>
+            <p className="text-xs text-zinc-300 mt-1">
+              Sent to: <span className="font-semibold text-emerald-400">{receiptSuccessToast.email}</span>
+            </p>
+            <p className="text-[11px] text-zinc-400 mt-0.5 font-mono">
+              Ref: {receiptSuccessToast.feeRef}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setReceiptSuccessToast(null)}
+            className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       )}
 
       {/* Edit Member Modal */}
@@ -7557,6 +8667,45 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 <ChevronRight className="w-4 h-4" />
               </motion.button>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* FLOATING SUCCESS TOAST: PAYMENT REMINDER DISPATCHED */}
+      <AnimatePresence>
+        {reminderSuccessToast && reminderSuccessToast.show && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ duration: 0.25 }}
+            className="fixed bottom-6 right-6 z-[110] max-w-md w-full p-4 rounded-2xl bg-zinc-950/95 border border-emerald-500/50 text-white shadow-2xl shadow-emerald-950/50 backdrop-blur-md flex items-start gap-3.5 font-sans"
+          >
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+            <div className="flex-1 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black uppercase tracking-wider font-mono text-emerald-400">
+                  Payment Reminders Delivered
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setReminderSuccessToast(null)}
+                  className="text-zinc-500 hover:text-white transition-colors cursor-pointer text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="text-xs text-zinc-300 leading-relaxed font-mono">
+                {reminderSuccessToast.message}
+              </p>
+              {reminderSuccessToast.email && (
+                <div className="text-[11px] text-emerald-400/80 font-mono truncate">
+                  Target: {reminderSuccessToast.email}
+                </div>
+              )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

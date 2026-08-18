@@ -204,6 +204,10 @@ function handleAction(action, data, token) {
   if (action === 'directAddMember' || action === 'addMember' || action === 'restoreMember' || action === 'adminAddMember') return handleDirectAddMember(data);
   if (action === 'resendReceipt' || action === 'resendFeeReceipt') return handleResendReceipt(data);
   if (action === 'resendIdCard') return handleResendIdCard(data);
+  if (action === 'sendPaymentReminders' || action === 'sendDueReminders') return handleSendPaymentReminders(data);
+  if (action === 'getDueMembers' || action === 'getOverdueMembers') return handleGetDueMembers();
+  if (action === 'configureReminderCron' || action === 'setupReminderCron') return handleConfigureReminderCron(data);
+  if (action === 'getReminderCronStatus') return handleGetReminderCronStatus();
   if (action === 'seedSampleData') return handleSeedSampleData();
 
   return createJsonResponse({
@@ -2239,7 +2243,7 @@ function handleDirectAddMember(data) {
 // Resend Receipt Email Handler
 function handleResendReceipt(data) {
   try {
-    var feeRef = cleanString(data.feeReferenceNumber || data.feeRef);
+    var feeRef = cleanString(data.feeReferenceNumber || data.feeRef || data.paymentRef);
     var rollNo = cleanString(data.rollNumber || data.rollNo);
     var regRef = cleanString(data.registrationReferenceNumber || data.registrationRef);
     var inputEmail = cleanString(data.email || data.emailAddress || data.memberEmail);
@@ -2248,7 +2252,7 @@ function handleResendReceipt(data) {
     if (!feeRef && !rollNo && !regRef) {
       return createJsonResponse({
         success: false,
-        message: 'Fee Reference Number, Roll Number, or Registration Reference is required to resend receipt.'
+        message: 'Payment transaction could not be found. Fee Reference Number, Roll Number, or Registration Reference is required.'
       });
     }
 
@@ -2311,6 +2315,7 @@ function handleResendReceipt(data) {
               'Total Payable Amount': regObj['Registration Fee'] || 100,
               'Payment Method': regObj['Payment Method'] || 'UPI',
               'Payment Status': regObj['Payment Status'] || regObj['Registration Status'] || 'Successful',
+              'Payment Date': regObj['Timestamp'] || formatDateShort(new Date()),
               'Receipt Number': 'ABG-REC-' + (regObj['Registration Reference Number'] || regObj['Roll Number'] || '001')
             };
             break;
@@ -2322,7 +2327,7 @@ function handleResendReceipt(data) {
     if (!matchedPayment && !feeRef) {
       return createJsonResponse({
         success: false,
-        message: 'No payment transaction record found.'
+        message: 'Payment transaction could not be found.'
       });
     }
 
@@ -2331,10 +2336,11 @@ function handleResendReceipt(data) {
     var resolvedMemberName = matchedPayment ? cleanString(matchedPayment['Member Name'] || matchedPayment['Full Name']) : cleanString(data.memberName || data.fullName);
     var resolvedRollNo = matchedPayment ? cleanString(matchedPayment['Roll Number']) : rollNo;
     var resolvedRegRef = matchedPayment ? cleanString(matchedPayment['Registration Reference Number']) : regRef;
-    var resolvedPlan = matchedPayment ? cleanString(matchedPayment['Selected Plan'] || matchedPayment['Plan']) : cleanString(data.selectedPlan || data.planName);
+    var resolvedPlan = matchedPayment ? cleanString(matchedPayment['Selected Plan'] || matchedPayment['Plan']) : cleanString(data.selectedPlan || data.planName || data.feeType);
     var resolvedAmount = matchedPayment ? (parseFloat(matchedPayment['Current Fee Amount'] || matchedPayment['Amount Paid'] || matchedPayment['Total Payable Amount'] || matchedPayment['Amount']) || parseFloat(data.amountPaid || data.feeAmount || 0)) : parseFloat(data.amountPaid || data.feeAmount || 0);
     var resolvedPayMethod = matchedPayment ? cleanString(matchedPayment['Payment Method']) : cleanString(data.paymentMethod || 'UPI');
     var resolvedStatus = matchedPayment ? cleanString(matchedPayment['Payment Status'] || 'Successful') : cleanString(data.paymentStatus || 'Successful');
+    var resolvedPaymentDate = matchedPayment ? cleanString(matchedPayment['Payment Date'] || matchedPayment['Timestamp'] || matchedPayment['Date']) : cleanString(data.paymentDate || formatDateShort(new Date()));
     var resolvedReceiptNo = matchedPayment ? cleanString(matchedPayment['Receipt Number']) : cleanString(data.receiptNumber || data.receiptNo || '');
 
     if (!resolvedReceiptNo) {
@@ -2394,19 +2400,22 @@ function handleResendReceipt(data) {
     if (!targetEmail || targetEmail.indexOf('@') === -1) {
       return createJsonResponse({
         success: false,
-        message: 'No registered email address found for ' + (resolvedMemberName || resolvedRollNo || resolvedFeeRef) + '. Please check member email.'
+        message: "Member email address is missing. Please update the member's email before resending the receipt."
       });
     }
 
-    // Send receipt email
+    // Send receipt email with PDF attachment
     var emailSent = sendConfirmationEmail('fee_payment', targetEmail, {
       memberName: resolvedMemberName || 'Gym Member',
       feeRef: resolvedFeeRef,
+      paymentRef: resolvedFeeRef,
       regRef: resolvedRollNo || resolvedRegRef,
       rollNumber: resolvedRollNo,
       amountPaid: resolvedAmount,
-      paymentMethod: resolvedPayMethod,
+      feeType: resolvedPlan || 'Membership Plan Fee',
       selectedPlan: resolvedPlan,
+      paymentDate: resolvedPaymentDate || formatDateShort(new Date()),
+      paymentMethod: resolvedPayMethod,
       status: resolvedStatus,
       receiptNo: resolvedReceiptNo
     });
@@ -2414,7 +2423,7 @@ function handleResendReceipt(data) {
     if (!emailSent) {
       return createJsonResponse({
         success: false,
-        message: 'Failed to send receipt email to ' + targetEmail + '. Please check recipient email delivery status.'
+        message: 'Unable to send receipt. Please try again.'
       });
     }
 
@@ -2422,7 +2431,7 @@ function handleResendReceipt(data) {
 
     return createJsonResponse({
       success: true,
-      message: 'Verified fee receipt successfully resent to ' + targetEmail + '.',
+      message: 'Receipt sent successfully to ' + targetEmail,
       receiptNumber: resolvedReceiptNo,
       data: {
         feeReferenceNumber: resolvedFeeRef,
@@ -2437,7 +2446,7 @@ function handleResendReceipt(data) {
     Logger.log('handleResendReceipt error: ' + err.toString());
     return createJsonResponse({
       success: false,
-      message: 'Failed to resend receipt: ' + err.toString()
+      message: 'Failed to send receipt. Please try again. Error: ' + err.toString()
     });
   }
 }
@@ -2562,6 +2571,409 @@ function handleResendIdCard(data) {
       success: false,
       message: 'Failed to resend ID Card: ' + err.toString()
     });
+  }
+}
+
+// Payment Reminders Handler (Manual Trigger & Filtered Batch Trigger)
+function handleSendPaymentReminders(data) {
+  try {
+    var rollNo = cleanString(data.rollNumber || data.rollNo);
+    var mode = cleanString(data.mode) || 'all'; // 'all', 'overdue', 'upcoming', 'balance'
+    var upcomingDays = Number(data.upcomingDays) || 7;
+    var adminName = cleanString(data.adminName) || 'Admin';
+    var customNote = cleanString(data.customNote || data.message);
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var mSheet = ss.getSheetByName(SHEETS.MEMBERS);
+    if (!mSheet || mSheet.getLastRow() <= 1) {
+      return createJsonResponse({
+        success: true,
+        count: 0,
+        message: 'No members on file to send reminders to.',
+        sentList: [],
+        skippedList: []
+      });
+    }
+
+    var mData = mSheet.getDataRange().getValues();
+    var headers = mData[0];
+    var rollIdx = headers.indexOf('Roll Number');
+    var nameIdx = headers.indexOf('Full Name');
+    var emailIdx = headers.indexOf('Email Address');
+    var phoneIdx = headers.indexOf('Phone Number');
+    var planIdx = headers.indexOf('Selected Plan');
+    var expIdx = headers.indexOf('Membership Expiry');
+    var balIdx = headers.indexOf('Previous Balance');
+    var statusIdx = headers.indexOf('Status');
+
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    var sentList = [];
+    var skippedList = [];
+
+    for (var i = 1; i < mData.length; i++) {
+      var row = mData[i];
+      var rNum = rollIdx !== -1 ? cleanString(row[rollIdx]).toUpperCase() : '';
+      var mName = nameIdx !== -1 ? cleanString(row[nameIdx]) : 'Member';
+      var mEmail = emailIdx !== -1 ? cleanString(row[emailIdx]) : '';
+      var mPhone = phoneIdx !== -1 ? cleanString(row[phoneIdx]) : '';
+      var mPlan = planIdx !== -1 ? cleanString(row[planIdx]) : 'Membership Plan';
+      var expStr = expIdx !== -1 ? cleanString(row[expIdx]) : '';
+      var balance = balIdx !== -1 ? (Number(row[balIdx]) || 0) : 0;
+      var status = statusIdx !== -1 ? cleanString(row[statusIdx]) : 'Active';
+
+      // If targeting single roll number
+      if (rollNo && rNum !== rollNo.toUpperCase()) {
+        continue;
+      }
+
+      // Calculate days difference
+      var isOverdue = false;
+      var isUpcoming = false;
+      var hasBalance = balance > 0;
+      var daysDiff = null;
+
+      if (expStr) {
+        var expDate = new Date(expStr);
+        if (!isNaN(expDate.getTime())) {
+          expDate.setHours(0, 0, 0, 0);
+          daysDiff = Math.round((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          if (daysDiff < 0 || status === 'Expired') {
+            isOverdue = true;
+          } else if (daysDiff <= upcomingDays) {
+            isUpcoming = true;
+          }
+        }
+      }
+
+      if (status === 'Expired' || status === 'Payment Due') {
+        isOverdue = true;
+      }
+
+      // Check mode filter
+      var shouldSend = false;
+      if (rollNo) {
+        shouldSend = true;
+      } else if (mode === 'overdue' && (isOverdue || hasBalance)) {
+        shouldSend = true;
+      } else if (mode === 'upcoming' && isUpcoming) {
+        shouldSend = true;
+      } else if (mode === 'balance' && hasBalance) {
+        shouldSend = true;
+      } else if (mode === 'all' && (isOverdue || isUpcoming || hasBalance)) {
+        shouldSend = true;
+      }
+
+      if (!shouldSend) {
+        continue;
+      }
+
+      if (!mEmail || mEmail.indexOf('@') === -1) {
+        skippedList.push({
+          rollNumber: rNum,
+          name: mName,
+          reason: 'Missing or invalid email address'
+        });
+        continue;
+      }
+
+      var reminderType = isOverdue ? 'OVERDUE' : (hasBalance ? 'BALANCE_DUE' : 'UPCOMING_RENEWAL');
+      var dueAmount = balance > 0 ? balance : 999; // Default renewal estimate if no balance
+
+      var sent = sendConfirmationEmail('payment_reminder', mEmail, {
+        fullName: mName,
+        rollNumber: rNum,
+        selectedPlan: mPlan,
+        expiryDate: expStr || 'Overdue',
+        daysDiff: daysDiff,
+        isOverdue: isOverdue,
+        hasBalance: hasBalance,
+        balance: balance,
+        dueAmount: dueAmount,
+        phone: mPhone,
+        customNote: customNote
+      });
+
+      if (sent) {
+        sentList.push({
+          rollNumber: rNum,
+          name: mName,
+          email: mEmail,
+          type: reminderType,
+          dueAmount: dueAmount,
+          expiryDate: expStr
+        });
+        logActivity(adminName, 'Sent Payment Reminder', 'Payment Reminder', rNum, status, status, 'Reminder sent to ' + mEmail + ' (' + reminderType + ')');
+      } else {
+        skippedList.push({
+          rollNumber: rNum,
+          name: mName,
+          reason: 'Email sending service returned false'
+        });
+      }
+    }
+
+    return createJsonResponse({
+      success: true,
+      count: sentList.length,
+      totalChecked: sentList.length + skippedList.length,
+      message: 'Successfully sent ' + sentList.length + ' payment reminder' + (sentList.length === 1 ? '' : 's') + '.',
+      sentList: sentList,
+      skippedList: skippedList
+    });
+
+  } catch (err) {
+    Logger.log('handleSendPaymentReminders error: ' + err.toString());
+    return createJsonResponse({
+      success: false,
+      message: 'Failed to process payment reminders: ' + err.toString()
+    });
+  }
+}
+
+// Get Due Members List
+function handleGetDueMembers() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var mSheet = ss.getSheetByName(SHEETS.MEMBERS);
+    if (!mSheet || mSheet.getLastRow() <= 1) {
+      return createJsonResponse({
+        success: true,
+        records: [],
+        overdueCount: 0,
+        upcomingCount: 0,
+        totalDueAmount: 0
+      });
+    }
+
+    var mData = mSheet.getDataRange().getValues();
+    var headers = mData[0];
+    var rollIdx = headers.indexOf('Roll Number');
+    var nameIdx = headers.indexOf('Full Name');
+    var emailIdx = headers.indexOf('Email Address');
+    var phoneIdx = headers.indexOf('Phone Number');
+    var planIdx = headers.indexOf('Selected Plan');
+    var expIdx = headers.indexOf('Membership Expiry');
+    var balIdx = headers.indexOf('Previous Balance');
+    var statusIdx = headers.indexOf('Status');
+    var joinIdx = headers.indexOf('Joining Date');
+
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    var dueMembers = [];
+    var overdueCount = 0;
+    var upcomingCount = 0;
+    var totalDueAmount = 0;
+
+    for (var i = 1; i < mData.length; i++) {
+      var row = mData[i];
+      var rNum = rollIdx !== -1 ? cleanString(row[rollIdx]) : '';
+      var mName = nameIdx !== -1 ? cleanString(row[nameIdx]) : '';
+      var mEmail = emailIdx !== -1 ? cleanString(row[emailIdx]) : '';
+      var mPhone = phoneIdx !== -1 ? cleanString(row[phoneIdx]) : '';
+      var mPlan = planIdx !== -1 ? cleanString(row[planIdx]) : 'Standard Plan';
+      var expStr = expIdx !== -1 ? cleanString(row[expIdx]) : '';
+      var balance = balIdx !== -1 ? (Number(row[balIdx]) || 0) : 0;
+      var status = statusIdx !== -1 ? cleanString(row[statusIdx]) : 'Active';
+      var joinDate = joinIdx !== -1 ? cleanString(row[joinIdx]) : '';
+
+      var isOverdue = false;
+      var isUpcoming = false;
+      var daysDiff = null;
+
+      if (expStr) {
+        var expDate = new Date(expStr);
+        if (!isNaN(expDate.getTime())) {
+          expDate.setHours(0, 0, 0, 0);
+          daysDiff = Math.round((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          if (daysDiff < 0 || status === 'Expired') {
+            isOverdue = true;
+          } else if (daysDiff <= 7) {
+            isUpcoming = true;
+          }
+        }
+      }
+
+      if (status === 'Expired' || status === 'Payment Due') {
+        isOverdue = true;
+      }
+
+      if (isOverdue || isUpcoming || balance > 0) {
+        var dueType = isOverdue ? 'OVERDUE' : (isUpcoming ? 'UPCOMING' : 'BALANCE_DUE');
+        if (isOverdue) overdueCount++;
+        else if (isUpcoming) upcomingCount++;
+
+        var estDue = balance > 0 ? balance : 999;
+        totalDueAmount += estDue;
+
+        dueMembers.push({
+          rollNumber: rNum,
+          fullName: mName,
+          email: mEmail,
+          phone: mPhone,
+          planName: mPlan,
+          membershipExpiry: expStr,
+          previousBalance: balance,
+          status: status,
+          joiningDate: joinDate,
+          daysDiff: daysDiff,
+          isOverdue: isOverdue,
+          isUpcoming: isUpcoming,
+          dueType: dueType,
+          dueAmount: estDue
+        });
+      }
+    }
+
+    return createJsonResponse({
+      success: true,
+      records: dueMembers,
+      overdueCount: overdueCount,
+      upcomingCount: upcomingCount,
+      totalDueAmount: totalDueAmount,
+      totalCount: dueMembers.length
+    });
+
+  } catch (err) {
+    Logger.log('handleGetDueMembers error: ' + err.toString());
+    return createJsonResponse({
+      success: false,
+      message: 'Failed to fetch due members: ' + err.toString()
+    });
+  }
+}
+
+// Configure Automated Daily Payment Reminder Cron Job
+function handleConfigureReminderCron(data) {
+  try {
+    var enable = data.enable === true || data.enabled === true || String(data.enable) === 'true';
+    var hour = Number(data.hour) || 9; // Default 9:00 AM
+
+    if (enable) {
+      setupDailyPaymentReminderTrigger(hour);
+      setSetting('reminderCronEnabled', 'true');
+      setSetting('reminderCronHour', String(hour));
+      logActivity('Admin', 'Configured Reminder Cron', 'System', 'CRON-DAILY', 'Disabled', 'Enabled', 'Daily payment reminder cron set to run at ' + hour + ':00 AM IST');
+      return createJsonResponse({
+        success: true,
+        enabled: true,
+        hour: hour,
+        message: 'Daily Payment Reminder cron job successfully scheduled to run at ' + hour + ':00 AM daily.'
+      });
+    } else {
+      removeDailyPaymentReminderTrigger();
+      setSetting('reminderCronEnabled', 'false');
+      logActivity('Admin', 'Disabled Reminder Cron', 'System', 'CRON-DAILY', 'Enabled', 'Disabled', 'Daily payment reminder cron disabled');
+      return createJsonResponse({
+        success: true,
+        enabled: false,
+        message: 'Daily Payment Reminder cron job has been disabled.'
+      });
+    }
+  } catch (err) {
+    Logger.log('handleConfigureReminderCron error: ' + err.toString());
+    return createJsonResponse({
+      success: false,
+      message: 'Failed to configure cron trigger: ' + err.toString()
+    });
+  }
+}
+
+// Get Cron Status
+function handleGetReminderCronStatus() {
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    var cronActive = false;
+    var triggerInfo = null;
+
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'sendDailyPaymentRemindersAutomatic') {
+        cronActive = true;
+        triggerInfo = {
+          handler: triggers[i].getHandlerFunction(),
+          id: triggers[i].getUniqueId(),
+          eventType: triggers[i].getEventType().toString()
+        };
+        break;
+      }
+    }
+
+    var savedEnabled = getSetting('reminderCronEnabled') === 'true';
+    var savedHour = Number(getSetting('reminderCronHour')) || 9;
+    var lastCronRun = getSetting('lastReminderCronRun') || 'Never';
+    var lastCronSentCount = Number(getSetting('lastReminderCronSentCount')) || 0;
+
+    return createJsonResponse({
+      success: true,
+      enabled: cronActive || savedEnabled,
+      hour: savedHour,
+      lastRun: lastCronRun,
+      lastSentCount: lastCronSentCount,
+      triggerActive: cronActive,
+      scheduleText: 'Every Day at ' + savedHour + ':00 AM IST',
+      triggerInfo: triggerInfo
+    });
+  } catch (err) {
+    return createJsonResponse({
+      success: true,
+      enabled: false,
+      hour: 9,
+      scheduleText: 'Every Day at 9:00 AM IST',
+      lastRun: 'Never'
+    });
+  }
+}
+
+// Time-Driven Cron Trigger Setup Functions
+function setupDailyPaymentReminderTrigger(hourToRun) {
+  removeDailyPaymentReminderTrigger();
+  var h = (hourToRun >= 0 && hourToRun <= 23) ? hourToRun : 9;
+  ScriptApp.newTrigger('sendDailyPaymentRemindersAutomatic')
+    .timeBased()
+    .everyDays(1)
+    .atHour(h)
+    .create();
+  Logger.log('Daily Payment Reminder Cron Trigger created for hour ' + h);
+}
+
+function removeDailyPaymentReminderTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendDailyPaymentRemindersAutomatic') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      Logger.log('Deleted existing daily reminder trigger: ' + triggers[i].getUniqueId());
+    }
+  }
+}
+
+// Automatic Cron Job Function (Invoked by Google Apps Script Timer)
+function sendDailyPaymentRemindersAutomatic() {
+  Logger.log('Executing automated daily payment reminder cron job...');
+  try {
+    var result = handleSendPaymentReminders({
+      mode: 'all',
+      upcomingDays: 7,
+      adminName: 'Automated Cron Job',
+      customNote: 'Daily Automated Reminder'
+    });
+
+    var nowStr = formatDate(new Date());
+    setSetting('lastReminderCronRun', nowStr);
+    
+    // Parse result count if JSON text output
+    var count = 0;
+    try {
+      var parsed = JSON.parse(result.getContent());
+      count = parsed.count || 0;
+      setSetting('lastReminderCronSentCount', String(count));
+    } catch(e) {}
+
+    logActivity('Cron System', 'Executed Daily Payment Reminders', 'System Trigger', 'CRON-DAILY', 'Scheduled', 'Completed', 'Sent ' + count + ' reminder email(s) on ' + nowStr);
+    Logger.log('Automated reminder cron finished. Sent count: ' + count);
+  } catch (cronErr) {
+    Logger.log('Error in automated reminder cron: ' + cronErr.toString());
   }
 }
 
@@ -2788,13 +3200,18 @@ function handleSendConfirmationEmail(data) {
 
 function sendConfirmationEmail(type, email, details) {
   if (!email || typeof email !== 'string' || email.indexOf('@') === -1) {
-    Logger.log('No valid email provided for confirmation. Email skipped.');
+    Logger.log('No valid email provided for confirmation. Email skipped: ' + email);
     return false;
   }
   try {
     var gymName = getSetting('gymName') || 'AB Gym Fitness Center';
+    var gymPhone = getSetting('gymPhone') || getSetting('phone') || '+91 98765 43210';
+    var gymEmail = getSetting('gymEmail') || getSetting('email') || 'support@abfitness.com';
+    var gymUpi = getSetting('upiId') || 'abfitness@upi';
+
     var subject = '';
     var htmlBody = '';
+    var attachments = [];
 
     if (type === 'registration') {
       subject = 'Registration Confirmation - ' + gymName;
@@ -2812,22 +3229,76 @@ function sendConfirmationEmail(type, email, details) {
         '<p>Best regards,<br><strong>' + gymName + ' Team</strong></p>' +
         '</div>';
     } else if (type === 'fee_payment') {
-      subject = 'Fee Payment Confirmation - ' + gymName;
-      htmlBody = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">' +
-        '<h2 style="color: #059669; margin-top: 0;">Fee Payment Receipt - ' + gymName + '</h2>' +
-        '<p>Dear <strong>' + (details.memberName || details.fullName || 'Member') + '</strong>,</p>' +
-        '<p>We have received your fee payment submission. Thank you!</p>' +
-        '<div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #10b981;">' +
-        '<p style="margin: 5px 0;"><strong>Fee Reference:</strong> ' + (details.feeRef || 'N/A') + '</p>' +
-        '<p style="margin: 5px 0;"><strong>Member / Ref ID:</strong> ' + (details.regRef || details.rollNumber || 'N/A') + '</p>' +
-        '<p style="margin: 5px 0;"><strong>Amount Paid:</strong> ₹' + (details.amountPaid || details.currentFeeAmount || 0) + '</p>' +
-        '<p style="margin: 5px 0;"><strong>Payment Method:</strong> ' + (details.paymentMethod || 'UPI') + '</p>' +
-        '<p style="margin: 5px 0;"><strong>Status:</strong> ' + (details.status || 'Pending Verification') + '</p>' +
+      var resolvedRef = details.feeRef || details.paymentRef || details.receiptNo || 'RECEIPT';
+      subject = 'AB GYM - Payment Receipt - ' + resolvedRef;
+      var memberName = details.memberName || details.fullName || 'Member';
+      var feeType = details.feeType || details.selectedPlan || details.planName || 'Membership Plan Fee';
+      var amtPaid = details.amountPaid || details.currentFeeAmount || details.feeAmount || 0;
+      var payDate = details.paymentDate || formatDateShort(new Date());
+      var payMethod = details.paymentMethod || 'UPI';
+      var payStatus = (details.status || 'SUCCESSFUL').toUpperCase();
+      var rollNum = details.rollNumber || details.regRef || 'N/A';
+
+      htmlBody = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 8px; background-color: #ffffff; color: #1e293b;">' +
+        '<div style="text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 18px;">' +
+        '<h2 style="color: #1e293b; margin: 0; font-size: 22px; letter-spacing: 0.5px;">' + gymName + '</h2>' +
+        '<p style="color: #64748b; margin: 3px 0 0; font-size: 12px; font-style: italic;">"Stronger Body, Stronger You"</p>' +
+        '</div>' +
+        '<p style="font-size: 14px; margin: 0 0 12px;">Dear <strong>' + memberName + '</strong>,</p>' +
+        '<p style="font-size: 14px; margin: 0 0 16px;">Please find attached your official payment receipt for AB GYM.</p>' +
+        '<div style="background-color: #f8fafc; padding: 16px; border-radius: 6px; margin: 16px 0; border-left: 4px solid #2563eb; font-size: 13px;">' +
+        '<p style="margin: 5px 0;"><strong>Payment Reference:</strong> <span style="font-family: monospace; color: #2563eb; font-weight: bold;">' + resolvedRef + '</span></p>' +
+        '<p style="margin: 5px 0;"><strong>Roll Number / ID:</strong> ' + rollNum + '</p>' +
+        '<p style="margin: 5px 0;"><strong>Fee Type:</strong> ' + feeType + '</p>' +
+        '<p style="margin: 5px 0;"><strong>Amount Paid:</strong> <span style="color: #16a34a; font-weight: bold;">₹' + amtPaid + '</span></p>' +
+        '<p style="margin: 5px 0;"><strong>Payment Method:</strong> ' + payMethod + '</p>' +
+        '<p style="margin: 5px 0;"><strong>Payment Date:</strong> ' + payDate + '</p>' +
+        '<p style="margin: 5px 0;"><strong>Status:</strong> <span style="color: #16a34a; font-weight: bold;">' + payStatus + '</span></p>' +
         (details.receiptNo ? '<p style="margin: 5px 0;"><strong>Receipt Number:</strong> ' + details.receiptNo + '</p>' : '') +
         '</div>' +
-        '<p>If you have any questions, please contact the gym office.</p>' +
-        '<p>Best regards,<br><strong>' + gymName + ' Team</strong></p>' +
+        '<p style="font-size: 14px; margin: 20px 0 4px;">Thank you,</p>' +
+        '<p style="font-size: 14px; font-weight: bold; margin: 0; color: #1e293b;">AB GYM</p>' +
+        '<p style="font-size: 12px; color: #64748b; font-style: italic; margin: 2px 0 0;">"Stronger Body, Stronger You"</p>' +
         '</div>';
+
+      // Generate Receipt PDF Blob
+      var receiptHtmlForPdf = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+        '<style>' +
+        'body { font-family: Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #ffffff; }' +
+        '.box { border: 2px solid #0f172a; border-radius: 8px; padding: 24px; max-width: 600px; margin: 0 auto; }' +
+        '.top { text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 16px; }' +
+        '.top h1 { margin: 0; color: #0f172a; font-size: 24px; }' +
+        '.top p { margin: 4px 0 0; color: #64748b; font-size: 12px; }' +
+        '.heading { font-size: 16px; font-weight: bold; color: #2563eb; text-align: right; margin-bottom: 14px; }' +
+        '.table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 13px; }' +
+        '.table td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }' +
+        '.table td.label { font-weight: bold; width: 40%; color: #475569; background: #f8fafc; }' +
+        '.foot { font-size: 11px; color: #94a3b8; text-align: center; margin-top: 20px; border-top: 1px dashed #cbd5e1; padding-top: 10px; }' +
+        '</style></head><body>' +
+        '<div class="box">' +
+        '<div class="top"><h1>AB GYM FITNESS</h1><p>Stronger Body, Stronger You | Moradabad | Phone: ' + gymPhone + '</p></div>' +
+        '<div class="heading">OFFICIAL PAYMENT RECEIPT</div>' +
+        '<table class="table">' +
+        '<tr><td class="label">Receipt / Payment Reference:</td><td>' + resolvedRef + '</td></tr>' +
+        '<tr><td class="label">Member Name:</td><td>' + memberName + '</td></tr>' +
+        '<tr><td class="label">Roll Number / ID:</td><td>' + rollNum + '</td></tr>' +
+        '<tr><td class="label">Fee Type / Plan:</td><td>' + feeType + '</td></tr>' +
+        '<tr><td class="label">Amount Paid:</td><td>₹' + amtPaid + '</td></tr>' +
+        '<tr><td class="label">Payment Method:</td><td>' + payMethod + '</td></tr>' +
+        '<tr><td class="label">Payment Date:</td><td>' + payDate + '</td></tr>' +
+        '<tr><td class="label">Payment Status:</td><td>' + payStatus + '</td></tr>' +
+        '</table>' +
+        '<div class="foot"><p>This is a computer-generated fee receipt from AB Gym Management Portal.</p><p>Thank you for training with AB Gym! Keep pushing your limits.</p></div>' +
+        '</div></body></html>';
+
+      try {
+        var pdfBlob = Utilities.newBlob(receiptHtmlForPdf, 'text/html', 'ABGYM_Receipt_' + resolvedRef + '.html')
+          .getAs('application/pdf')
+          .setName('ABGYM_Receipt_' + resolvedRef + '.pdf');
+        attachments.push(pdfBlob);
+      } catch (pdfErr) {
+        Logger.log('PDF generation warning: ' + pdfErr.toString());
+      }
     } else if (type === 'registration_approved') {
       subject = 'Registration Approved & Roll Number Assigned - ' + gymName;
       htmlBody = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #10b981; border-radius: 8px;">' +
@@ -2842,14 +3313,63 @@ function sendConfirmationEmail(type, email, details) {
         '<p>You can now use your Roll Number to log in and manage your membership.</p>' +
         '<p>Best regards,<br><strong>' + gymName + ' Team</strong></p>' +
         '</div>';
+    } else if (type === 'payment_reminder') {
+      var isOverdue = details.isOverdue === true;
+      var hasBal = details.hasBalance === true;
+      var statusColor = isOverdue ? '#dc2626' : (hasBal ? '#d97706' : '#2563eb');
+      var statusBg = isOverdue ? '#fef2f2' : (hasBal ? '#fffbeb' : '#eff6ff');
+      var statusTitle = isOverdue ? '⚠️ Membership Payment Overdue' : (hasBal ? '⏳ Pending Balance Reminder' : '🔔 Membership Renewal Reminder');
+      
+      subject = statusTitle + ' [' + (details.rollNumber || 'Member') + '] - ' + gymName;
+      
+      htmlBody = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px;">' +
+        '<div style="max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border: 1px solid #e2e8f0;">' +
+        '<div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 24px; text-align: center; color: #ffffff;">' +
+        '<h1 style="margin: 0; font-size: 22px; letter-spacing: 1px; color: #f59e0b; font-weight: 800;">' + gymName.toUpperCase() + '</h1>' +
+        '<p style="margin: 4px 0 0 0; font-size: 13px; color: #94a3b8; letter-spacing: 0.5px;">OFFICIAL PAYMENT NOTIFICATION</p>' +
+        '</div>' +
+        '<div style="background-color: ' + statusBg + '; padding: 14px 20px; border-bottom: 2px solid ' + statusColor + '; text-align: center;">' +
+        '<span style="font-size: 15px; font-weight: 700; color: ' + statusColor + ';">' + statusTitle + '</span>' +
+        '</div>' +
+        '<div style="padding: 24px;">' +
+        '<p style="margin: 0 0 16px 0; font-size: 15px; color: #334155;">Dear <strong>' + (details.fullName || 'Member') + '</strong>,</p>' +
+        '<p style="margin: 0 0 18px 0; font-size: 14px; color: #475569; line-height: 1.6;">' +
+        (isOverdue 
+          ? 'This is a courteous reminder that your gym membership at <strong>' + gymName + '</strong> has expired or has an overdue balance. To maintain uninterrupted access to gym facilities and personal training sessions, please clear your outstanding dues at your earliest convenience.' 
+          : 'This is an advance reminder that your gym membership at <strong>' + gymName + '</strong> is scheduled for renewal soon. Renewing on time guarantees continuous access to all fitness equipment, workout zones, and coaching support.') +
+        '</p>' +
+        '<div style="background-color: #f8fafc; border-radius: 8px; padding: 16px; margin-bottom: 20px; border: 1px solid #e2e8f0;">' +
+        '<table style="width: 100%; border-collapse: collapse; font-size: 14px;">' +
+        '<tr><td style="padding: 6px 0; color: #64748b;">Roll Number:</td><td style="padding: 6px 0; font-weight: 700; text-align: right; color: #0f172a; font-family: monospace;">' + (details.rollNumber || 'N/A') + '</td></tr>' +
+        '<tr><td style="padding: 6px 0; color: #64748b;">Membership Plan:</td><td style="padding: 6px 0; font-weight: 600; text-align: right; color: #0f172a;">' + (details.selectedPlan || 'Gym Plan') + '</td></tr>' +
+        '<tr><td style="padding: 6px 0; color: #64748b;">Due / Expiry Date:</td><td style="padding: 6px 0; font-weight: 700; text-align: right; color: ' + statusColor + ';">' + (details.expiryDate || 'Immediate') + '</td></tr>' +
+        '<tr><td style="padding: 6px 0; color: #64748b;">Payable Amount:</td><td style="padding: 6px 0; font-weight: 800; font-size: 18px; text-align: right; color: #059669;">₹' + (details.dueAmount || details.balance || 999) + '</td></tr>' +
+        '</table>' +
+        '</div>' +
+        '<div style="background-color: #f0fdf4; border-radius: 8px; padding: 16px; border: 1px solid #bbf7d0; margin-bottom: 20px;">' +
+        '<h4 style="margin: 0 0 8px 0; color: #166534; font-size: 14px; font-weight: 700;">💳 Quick Online Payment (UPI)</h4>' +
+        '<p style="margin: 0 0 6px 0; font-size: 13px; color: #15803d;">Pay via Google Pay, PhonePe, Paytm, or BHIM to:</p>' +
+        '<p style="margin: 0; font-family: monospace; font-size: 15px; font-weight: 800; color: #14532d; background: #dcfce7; padding: 6px 10px; border-radius: 4px; display: inline-block;">' + gymUpi + '</p>' +
+        '<p style="margin: 8px 0 0 0; font-size: 12px; color: #166534;">Or visit the gym front desk to pay via Cash / QR Code.</p>' +
+        '</div>' +
+        (details.customNote ? '<p style="font-size: 13px; color: #64748b; font-style: italic; margin-bottom: 16px;"><strong>Note from Gym:</strong> ' + details.customNote + '</p>' : '') +
+        '<p style="font-size: 13px; color: #64748b; margin: 0; line-height: 1.5;">For assistance, fee adjustments, or queries, please contact our front desk at <strong>' + gymPhone + '</strong> or email <strong>' + gymEmail + '</strong>.</p>' +
+        '</div>' +
+        '<div style="background-color: #f1f5f9; padding: 14px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b;">' +
+        '© ' + new Date().getFullYear() + ' ' + gymName + ' • Keeping You Strong & Fit' +
+        '</div></div></body></html>';
     }
 
     if (subject && htmlBody) {
-      MailApp.sendEmail({
+      var mailOptions = {
         to: email,
         subject: subject,
         htmlBody: htmlBody
-      });
+      };
+      if (attachments && attachments.length > 0) {
+        mailOptions.attachments = attachments;
+      }
+      MailApp.sendEmail(mailOptions);
       Logger.log('Confirmation email (' + type + ') successfully sent to: ' + email);
       return true;
     }

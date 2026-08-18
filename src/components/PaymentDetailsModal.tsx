@@ -41,6 +41,7 @@ interface PaymentDetailsModalProps {
   onOpenAddFee?: (member?: Member) => void;
   onResendReceipt?: (record: FeePaymentRecord) => void;
   isResendingReceipt?: boolean;
+  receiptSent?: boolean;
 }
 
 export const PaymentDetailsModal: React.FC<PaymentDetailsModalProps> = ({
@@ -54,6 +55,7 @@ export const PaymentDetailsModal: React.FC<PaymentDetailsModalProps> = ({
   onOpenAddFee,
   onResendReceipt,
   isResendingReceipt = false,
+  receiptSent = false,
 }) => {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isZoomingScreenshot, setIsZoomingScreenshot] = useState(false);
@@ -203,19 +205,28 @@ export const PaymentDetailsModal: React.FC<PaymentDetailsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => onResendReceipt(record)}
-                    disabled={isResendingReceipt}
-                    className="px-3 py-2 bg-blue-950/60 hover:bg-blue-900/60 text-blue-300 border border-blue-500/30 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    disabled={isResendingReceipt || receiptSent}
+                    className={`px-3 py-2 border font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-75 ${
+                      receiptSent
+                        ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
+                        : 'bg-blue-950/60 hover:bg-blue-900/60 text-blue-300 border-blue-500/30'
+                    }`}
                     title="Resend verified receipt to member's email"
                   >
                     {isResendingReceipt ? (
                       <>
                         <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin" />
-                        <span>Sending...</span>
+                        <span>SENDING...</span>
+                      </>
+                    ) : receiptSent ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-300">✓ RECEIPT SENT</span>
                       </>
                     ) : (
                       <>
                         <Mail className="w-3.5 h-3.5 text-blue-400" />
-                        <span>Resend Receipt</span>
+                        <span>RESEND RECEIPT</span>
                       </>
                     )}
                   </button>

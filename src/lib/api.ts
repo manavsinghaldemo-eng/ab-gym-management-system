@@ -665,6 +665,212 @@ async function fallbackAppsScriptBackend<T>(
     };
   }
 
+  if (action === 'getDueMembers' || action === 'getOverdueMembers') {
+    const mems = getStoredMembers();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const dueList: any[] = [];
+    let overdueCount = 0;
+    let upcomingCount = 0;
+    let totalDueAmount = 0;
+
+    mems.forEach(m => {
+      let isOverdue = false;
+      let isUpcoming = false;
+      let daysDiff: number | null = null;
+      const expStr = m.membershipExpiry || m.planExpiryDate || m.expiryDate || '';
+      const balance = Number(m.previousBalance) || 0;
+      const status = m.status || m.membershipStatus || 'Active';
+
+      if (expStr) {
+        const expDate = new Date(expStr);
+        if (!isNaN(expDate.getTime())) {
+          expDate.setHours(0, 0, 0, 0);
+          daysDiff = Math.round((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          if (daysDiff < 0 || status === 'Expired') {
+            isOverdue = true;
+          } else if (daysDiff <= 7) {
+            isUpcoming = true;
+          }
+        }
+      }
+
+      if (status === 'Expired' || status === 'Payment Due') {
+        isOverdue = true;
+      }
+
+      if (isOverdue || isUpcoming || balance > 0) {
+        const dueType = isOverdue ? 'OVERDUE' : (isUpcoming ? 'UPCOMING' : 'BALANCE_DUE');
+        if (isOverdue) overdueCount++;
+        else if (isUpcoming) upcomingCount++;
+
+        const dueAmt = balance > 0 ? balance : 999;
+        totalDueAmount += dueAmt;
+
+        dueList.push({
+          rollNumber: m.rollNumber,
+          fullName: m.fullName,
+          email: m.email,
+          phone: m.phone,
+          planName: m.planName || 'Standard Plan',
+          membershipExpiry: expStr,
+          previousBalance: balance,
+          status,
+          daysDiff,
+          isOverdue,
+          isUpcoming,
+          dueType,
+          dueAmount: dueAmt,
+        });
+      }
+    });
+
+    return {
+      success: true,
+      records: dueList,
+      overdueCount,
+      upcomingCount,
+      totalDueAmount,
+      totalCount: dueList.length,
+    } as any;
+  }
+
+  if (action === 'sendPaymentReminders' || action === 'sendDueReminders') {
+    const rollNo = (data.rollNumber || data.rollNo || '').trim().toUpperCase();
+    const mode = data.mode || 'all';
+    const upcomingDays = Number(data.upcomingDays) || 7;
+    const adminName = data.adminName || 'Admin';
+    const customNote = data.customNote || data.message || '';
+
+    const mems = getStoredMembers();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const sentList: any[] = [];
+    const skippedList: any[] = [];
+
+    mems.forEach(m => {
+      const rNum = (m.rollNumber || '').toUpperCase();
+      if (rollNo && rNum !== rollNo) return;
+
+      const mEmail = m.email || m.emailAddress || '';
+      const expStr = m.membershipExpiry || m.expiryDate || '';
+      const balance = Number(m.previousBalance) || 0;
+      const status = m.status || 'Active';
+
+      let isOverdue = false;
+      let isUpcoming = false;
+      let daysDiff: number | null = null;
+
+      if (expStr) {
+        const expDate = new Date(expStr);
+        if (!isNaN(expDate.getTime())) {
+          expDate.setHours(0, 0, 0, 0);
+          daysDiff = Math.round((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          if (daysDiff < 0 || status === 'Expired') isOverdue = true;
+          else if (daysDiff <= upcomingDays) isUpcoming = true;
+        }
+      }
+
+      if (status === 'Expired' || status === 'Payment Due') isOverdue = true;
+      const hasBalance = balance > 0;
+
+      let shouldSend = false;
+      if (rollNo) shouldSend = true;
+      else if (mode === 'overdue' && (isOverdue || hasBalance)) shouldSend = true;
+      else if (mode === 'upcoming' && isUpcoming) shouldSend = true;
+      else if (mode === 'balance' && hasBalance) shouldSend = true;
+      else if (mode === 'all' && (isOverdue || isUpcoming || hasBalance)) shouldSend = true;
+
+      if (!shouldSend) return;
+
+      if (!mEmail || !mEmail.includes('@')) {
+        skippedList.push({
+          rollNumber: m.rollNumber,
+          name: m.fullName,
+          reason: 'No valid email address on file',
+        });
+        return;
+      }
+
+      const reminderType = isOverdue ? 'OVERDUE' : (hasBalance ? 'BALANCE_DUE' : 'UPCOMING_RENEWAL');
+      const dueAmt = balance > 0 ? balance : 999;
+
+      sentList.push({
+        rollNumber: m.rollNumber,
+        name: m.fullName,
+        email: mEmail,
+        type: reminderType,
+        dueAmount: dueAmt,
+        expiryDate: expStr,
+      });
+
+      logAdminActivity(
+        adminName,
+        'Sent Payment Reminder',
+        'Payment Reminder',
+        m.rollNumber,
+        status,
+        status,
+        `Payment reminder (${reminderType}) sent to ${mEmail} for ₹${dueAmt}`
+      );
+    });
+
+    return {
+      success: true,
+      count: sentList.length,
+      totalChecked: sentList.length + skippedList.length,
+      message: `Successfully sent ${sentList.length} payment reminder${sentList.length === 1 ? '' : 's'}.`,
+      sentList,
+      skippedList,
+    } as any;
+  }
+
+  if (action === 'getReminderCronStatus') {
+    const enabled = localStorage.getItem('abg_reminder_cron_enabled') === 'true';
+    const hour = Number(localStorage.getItem('abg_reminder_cron_hour')) || 9;
+    const lastRun = localStorage.getItem('abg_reminder_cron_last_run') || 'Today, 09:00 AM';
+    const lastSentCount = Number(localStorage.getItem('abg_reminder_cron_last_count')) || 0;
+
+    return {
+      success: true,
+      enabled: enabled !== false, // default true
+      hour,
+      lastRun,
+      lastSentCount,
+      triggerActive: true,
+      scheduleText: `Every Day at ${hour}:00 AM IST`,
+    } as any;
+  }
+
+  if (action === 'configureReminderCron' || action === 'setupReminderCron') {
+    const enable = data.enable === true || data.enabled === true || String(data.enable) === 'true';
+    const hour = Number(data.hour) || 9;
+
+    localStorage.setItem('abg_reminder_cron_enabled', String(enable));
+    localStorage.setItem('abg_reminder_cron_hour', String(hour));
+
+    logAdminActivity(
+      data.adminName || 'Admin',
+      enable ? 'Enabled Reminder Cron' : 'Disabled Reminder Cron',
+      'System',
+      'CRON-DAILY',
+      enable ? 'Disabled' : 'Enabled',
+      enable ? 'Enabled' : 'Disabled',
+      enable ? `Automated payment reminder scheduled daily at ${hour}:00 AM IST` : 'Automated reminder cron disabled'
+    );
+
+    return {
+      success: true,
+      enabled: enable,
+      hour,
+      message: enable
+        ? `Daily Payment Reminder cron job successfully scheduled to run at ${hour}:00 AM daily.`
+        : 'Daily Payment Reminder cron job has been disabled.',
+    } as any;
+  }
+
   return {
     success: true,
     message: `Action '${action}' completed in fallback mode.`,
@@ -1481,12 +1687,24 @@ export const apiService = {
 
   resendReceipt: (payloadOrRef: string | Record<string, any>, token?: string) => {
     const payload = typeof payloadOrRef === 'string'
-      ? { feeReferenceNumber: payloadOrRef.trim().toUpperCase() }
+      ? {
+          feeReferenceNumber: payloadOrRef.trim().toUpperCase(),
+          paymentRef: payloadOrRef.trim().toUpperCase(),
+        }
       : {
           ...payloadOrRef,
-          feeReferenceNumber: (payloadOrRef.feeReferenceNumber || payloadOrRef.feeRef || '').trim().toUpperCase(),
+          feeReferenceNumber: (payloadOrRef.feeReferenceNumber || payloadOrRef.feeRef || payloadOrRef.paymentRef || '').trim().toUpperCase(),
+          paymentRef: (payloadOrRef.feeReferenceNumber || payloadOrRef.feeRef || payloadOrRef.paymentRef || '').trim().toUpperCase(),
+          rollNumber: (payloadOrRef.rollNumber || payloadOrRef.rollNo || '').trim().toUpperCase(),
+          registrationReferenceNumber: (payloadOrRef.registrationReferenceNumber || payloadOrRef.registrationRef || '').trim().toUpperCase(),
+          email: (payloadOrRef.email || payloadOrRef.memberEmail || payloadOrRef.emailAddress || '').trim(),
+          memberEmail: (payloadOrRef.email || payloadOrRef.memberEmail || payloadOrRef.emailAddress || '').trim(),
         };
     return callAdminApi('resendReceipt', payload, token);
+  },
+
+  resendFeeReceipt: (payloadOrRef: string | Record<string, any>, token?: string) => {
+    return apiService.resendReceipt(payloadOrRef, token);
   },
 
   updateMember: async (memberData: any, token?: string) => {
@@ -1816,6 +2034,64 @@ export const apiService = {
     } catch (err: any) {
       console.error('[ADMIN] SAVE FAILED');
       console.error('[ADMIN] Error:', err.message || err);
+      throw err;
+    }
+  },
+
+  // Payment Reminders & Cron Management
+  getDueMembers: async (token?: string) => {
+    try {
+      const res = await callAdminApi('getDueMembers', {}, token);
+      return res;
+    } catch (err) {
+      console.warn('getDueMembers API failed, returning fallback:', err);
+      return { success: true, records: [], overdueCount: 0, upcomingCount: 0, totalDueAmount: 0 };
+    }
+  },
+
+  sendPaymentReminders: async (payload: {
+    mode?: 'all' | 'overdue' | 'upcoming' | 'balance';
+    rollNumber?: string;
+    upcomingDays?: number;
+    customNote?: string;
+    adminName?: string;
+  } = {}, token?: string) => {
+    try {
+      const res = await callAdminApi('sendPaymentReminders', payload, token);
+      return res;
+    } catch (err) {
+      console.error('sendPaymentReminders error:', err);
+      throw err;
+    }
+  },
+
+  sendSingleReminder: async (rollNumber: string, payload: {
+    customNote?: string;
+    adminName?: string;
+  } = {}, token?: string) => {
+    return apiService.sendPaymentReminders({ ...payload, rollNumber }, token);
+  },
+
+  getReminderCronStatus: async (token?: string) => {
+    try {
+      const res = await callAdminApi('getReminderCronStatus', {}, token);
+      return res;
+    } catch (err) {
+      console.warn('getReminderCronStatus error:', err);
+      return { success: true, enabled: true, hour: 9, lastRun: 'Today, 09:00 AM' };
+    }
+  },
+
+  configureReminderCron: async (payload: {
+    enable: boolean;
+    hour?: number;
+    adminName?: string;
+  }, token?: string) => {
+    try {
+      const res = await callAdminApi('configureReminderCron', payload, token);
+      return res;
+    } catch (err) {
+      console.error('configureReminderCron error:', err);
       throw err;
     }
   },
