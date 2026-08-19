@@ -445,15 +445,31 @@ const normalizeActivityLog = (record: any, idx: number): ActivityLogRecord => {
   };
 };
 
-const getFeeReferenceNumber = (payment: any) =>
-  String(
-    payment?.feeReferenceNumber ||
-    payment?.feeReference ||
-    payment?.["Fee Reference Number"] ||
-    payment?.feeRef ||
-    payment?.id ||
+const getFeeReferenceNumber = (payment: any): string => {
+  if (!payment) return "";
+  if (typeof payment === "string") return payment.trim().toUpperCase();
+  const val = (
+    payment.feeReferenceNumber ||
+    payment.fee_ref_no ||
+    payment.feeReferenceNo ||
+    payment.fee_reference_number ||
+    payment.feeRef ||
+    payment.feeReference ||
+    payment.fee_reference ||
+    payment["Fee Reference Number"] ||
+    payment["Fee Reference No"] ||
+    payment["Fee Ref #"] ||
+    payment["Fee Ref"] ||
+    payment.paymentRef ||
+    payment.paymentReference ||
+    payment["Payment Ref"] ||
+    payment["Payment Reference Number"] ||
+    payment.feeId ||
+    payment.id ||
     ""
-  ).trim().toUpperCase();
+  );
+  return String(val).trim().toUpperCase();
+};
 
 const isStatusApproved = (status?: unknown): boolean => isPaymentApproved(status);
 const isStatusRejected = (status?: unknown): boolean => isPaymentRejected(status);
@@ -2822,32 +2838,32 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       return;
     }
 
-    const feeRef = (fee.feeReferenceNumber || (fee as any).feeRef || (fee as any).paymentRef || '').trim().toUpperCase();
-    const rollNo = (fee.rollNumber || (fee as any).rollNo || '').trim().toUpperCase();
-    const regRef = (fee.registrationRef || (fee as any).registrationReferenceNumber || '').trim().toUpperCase();
-    const memberName = (fee.memberName || (fee as any).fullName || 'Member').trim();
-    const feeType = ((fee as any).feeType || fee.selectedPlan || fee.planName || (fee as any).membershipPlan || 'Membership Plan Fee').trim();
-    const paymentDate = (fee.paymentDate || (fee as any).timestamp || (fee as any).createdAt || new Date().toISOString().split('T')[0]).trim();
-    const paymentMethod = (fee.paymentMethod || 'UPI').trim();
-    const amountPaid = Number(fee.amountPaid ?? (fee as any).currentFeeAmount ?? (fee as any).feeAmount ?? (fee as any).amount ?? 0);
-    const paymentStatus = (fee.paymentStatus || fee.status || 'Successful').trim();
-    const receiptNumber = (fee.receiptNumber || (fee as any).receiptNo || '').trim();
+    const feeRef = getFeeReferenceNumber(fee);
+    const rollNo = (fee.rollNumber || (fee as any).rollNo || (fee as any)['Roll Number'] || '').toString().trim().toUpperCase();
+    const regRef = (fee.registrationRef || (fee as any).registrationReferenceNumber || (fee as any)['Registration Reference Number'] || '').toString().trim().toUpperCase();
+    const memberName = (fee.memberName || (fee as any).fullName || (fee as any)['Member Name'] || (fee as any)['Full Name'] || 'Gym Member').toString().trim();
+    const feeType = ((fee as any).feeType || fee.selectedPlan || fee.planName || (fee as any).membershipPlan || (fee as any)['Selected Plan'] || (fee as any)['Plan Name'] || 'Membership Plan Fee').toString().trim();
+    const paymentDate = (fee.paymentDate || (fee as any).timestamp || (fee as any).createdAt || (fee as any)['Payment Date'] || (fee as any)['Timestamp'] || new Date().toISOString().split('T')[0]).toString().trim();
+    const paymentMethod = (fee.paymentMethod || (fee as any)['Payment Method'] || 'UPI').toString().trim();
+    const amountPaid = Number(fee.amountPaid ?? (fee as any).currentFeeAmount ?? (fee as any).feeAmount ?? (fee as any).amount ?? (fee as any)['Amount Paid'] ?? (fee as any)['Current Fee Amount'] ?? 0);
+    const paymentStatus = (fee.paymentStatus || fee.status || (fee as any)['Payment Status'] || 'Successful').toString().trim();
+    const receiptNumber = (fee.receiptNumber || (fee as any).receiptNo || (fee as any)['Receipt Number'] || '').toString().trim();
 
     if (!feeRef && !rollNo && !regRef) {
-      alert('Payment transaction could not be found.');
+      alert('Payment transaction could not be found. Fee Reference Number is missing.');
       return;
     }
 
     // Resolve member email address
-    let targetEmail = (fee.memberEmail || (fee as any).email || (fee as any).emailAddress || '').trim();
+    let targetEmail = (fee.memberEmail || (fee as any).email || (fee as any).emailAddress || (fee as any)['Email Address'] || (fee as any)['Email'] || '').toString().trim();
     if (!targetEmail && rollNo) {
-      const matchM = members.find(m => (m.rollNumber || (m as any).rollNo || '').trim().toUpperCase() === rollNo);
+      const matchM = members.find(m => (m.rollNumber || (m as any).rollNo || (m as any)['Roll Number'] || '').toString().trim().toUpperCase() === rollNo);
       if (matchM?.email) {
         targetEmail = matchM.email.trim();
       }
     }
     if (!targetEmail && regRef) {
-      const matchR = registrations.find(r => (r.registrationRef || (r as any).registrationReferenceNumber || '').trim().toUpperCase() === regRef);
+      const matchR = registrations.find(r => (r.registrationRef || (r as any).registrationReferenceNumber || (r as any)['Registration Reference Number'] || '').toString().trim().toUpperCase() === regRef);
       if (matchR?.email) {
         targetEmail = matchR.email.trim();
       }
@@ -2864,7 +2880,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       const currentAdminName = localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Admin';
       const payload = {
         feeReferenceNumber: feeRef,
+        fee_ref_no: feeRef,
+        feeReferenceNo: feeRef,
+        fee_reference_number: feeRef,
+        feeRef: feeRef,
+        fee_reference: feeRef,
         paymentRef: feeRef,
+        paymentReference: feeRef,
+        id: feeRef,
         rollNumber: rollNo,
         registrationReferenceNumber: regRef,
         registrationRef: regRef,
@@ -6795,7 +6818,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       )}
 
       {/* Resend Receipt Success Confirmation Toast / Modal */}
-      {receiptSuccessToast && receiptSuccessToast.show && (
+      {Boolean(receiptSuccessToast?.show) && receiptSuccessToast && (
         <div className="fixed bottom-6 right-6 z-50 max-w-md bg-slate-900 border border-emerald-500/50 text-white rounded-2xl p-4 shadow-2xl shadow-emerald-950/60 flex items-start gap-3.5 animate-in fade-in slide-in-from-bottom-5">
           <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0 mt-0.5 text-emerald-400">
             <CheckCircle2 className="w-5 h-5" />
@@ -8673,7 +8696,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
       {/* FLOATING SUCCESS TOAST: PAYMENT REMINDER DISPATCHED */}
       <AnimatePresence>
-        {reminderSuccessToast && reminderSuccessToast.show && (
+        {Boolean(reminderSuccessToast?.show) && reminderSuccessToast && (
           <motion.div
             initial={{ opacity: 0, y: 50, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}

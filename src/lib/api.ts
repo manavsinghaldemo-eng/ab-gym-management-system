@@ -1686,20 +1686,62 @@ export const apiService = {
   },
 
   resendReceipt: (payloadOrRef: string | Record<string, any>, token?: string) => {
-    const payload = typeof payloadOrRef === 'string'
-      ? {
-          feeReferenceNumber: payloadOrRef.trim().toUpperCase(),
-          paymentRef: payloadOrRef.trim().toUpperCase(),
-        }
-      : {
-          ...payloadOrRef,
-          feeReferenceNumber: (payloadOrRef.feeReferenceNumber || payloadOrRef.feeRef || payloadOrRef.paymentRef || '').trim().toUpperCase(),
-          paymentRef: (payloadOrRef.feeReferenceNumber || payloadOrRef.feeRef || payloadOrRef.paymentRef || '').trim().toUpperCase(),
-          rollNumber: (payloadOrRef.rollNumber || payloadOrRef.rollNo || '').trim().toUpperCase(),
-          registrationReferenceNumber: (payloadOrRef.registrationReferenceNumber || payloadOrRef.registrationRef || '').trim().toUpperCase(),
-          email: (payloadOrRef.email || payloadOrRef.memberEmail || payloadOrRef.emailAddress || '').trim(),
-          memberEmail: (payloadOrRef.email || payloadOrRef.memberEmail || payloadOrRef.emailAddress || '').trim(),
-        };
+    let feeRef = '';
+    let payload: Record<string, any> = {};
+
+    if (typeof payloadOrRef === 'string') {
+      feeRef = payloadOrRef.trim().toUpperCase();
+      payload = {
+        feeReferenceNumber: feeRef,
+        fee_ref_no: feeRef,
+        feeReferenceNo: feeRef,
+        fee_reference_number: feeRef,
+        feeRef: feeRef,
+        fee_reference: feeRef,
+        paymentRef: feeRef,
+        paymentReference: feeRef,
+        id: feeRef,
+      };
+    } else if (payloadOrRef && typeof payloadOrRef === 'object') {
+      feeRef = (
+        payloadOrRef.feeReferenceNumber ||
+        payloadOrRef.fee_ref_no ||
+        payloadOrRef.feeReferenceNo ||
+        payloadOrRef.fee_reference_number ||
+        payloadOrRef.feeRef ||
+        payloadOrRef.feeReference ||
+        payloadOrRef.fee_reference ||
+        payloadOrRef['Fee Reference Number'] ||
+        payloadOrRef['Fee Reference No'] ||
+        payloadOrRef['Fee Ref #'] ||
+        payloadOrRef['Fee Ref'] ||
+        payloadOrRef.paymentRef ||
+        payloadOrRef.paymentReference ||
+        payloadOrRef['Payment Ref'] ||
+        payloadOrRef['Payment Reference Number'] ||
+        payloadOrRef.feeId ||
+        payloadOrRef.id ||
+        ''
+      ).toString().trim().toUpperCase();
+
+      payload = {
+        ...payloadOrRef,
+        feeReferenceNumber: feeRef || payloadOrRef.feeReferenceNumber || '',
+        fee_ref_no: feeRef,
+        feeReferenceNo: feeRef,
+        fee_reference_number: feeRef,
+        feeRef: feeRef,
+        fee_reference: feeRef,
+        paymentRef: feeRef,
+        paymentReference: feeRef,
+        id: feeRef,
+        rollNumber: (payloadOrRef.rollNumber || payloadOrRef.rollNo || payloadOrRef['Roll Number'] || '').toString().trim().toUpperCase(),
+        registrationReferenceNumber: (payloadOrRef.registrationReferenceNumber || payloadOrRef.registrationRef || payloadOrRef['Registration Reference Number'] || '').toString().trim().toUpperCase(),
+        registrationRef: (payloadOrRef.registrationReferenceNumber || payloadOrRef.registrationRef || payloadOrRef['Registration Reference Number'] || '').toString().trim().toUpperCase(),
+        email: (payloadOrRef.email || payloadOrRef.memberEmail || payloadOrRef.emailAddress || payloadOrRef['Email Address'] || '').toString().trim(),
+        memberEmail: (payloadOrRef.email || payloadOrRef.memberEmail || payloadOrRef.emailAddress || payloadOrRef['Email Address'] || '').toString().trim(),
+      };
+    }
     return callAdminApi('resendReceipt', payload, token);
   },
 

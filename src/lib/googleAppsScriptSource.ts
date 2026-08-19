@@ -2243,16 +2243,30 @@ function handleDirectAddMember(data) {
 // Resend Receipt Email Handler
 function handleResendReceipt(data) {
   try {
-    var feeRef = cleanString(data.feeReferenceNumber || data.feeRef || data.paymentRef);
-    var rollNo = cleanString(data.rollNumber || data.rollNo);
-    var regRef = cleanString(data.registrationReferenceNumber || data.registrationRef);
-    var inputEmail = cleanString(data.email || data.emailAddress || data.memberEmail);
+    var feeRef = cleanString(
+      data.feeReferenceNumber ||
+      data.fee_ref_no ||
+      data.feeReferenceNo ||
+      data.fee_reference_number ||
+      data.feeRef ||
+      data.feeReference ||
+      data.fee_reference ||
+      data['Fee Reference Number'] ||
+      data['Fee Reference No'] ||
+      data['Fee Ref'] ||
+      data.paymentRef ||
+      data.paymentReference ||
+      data.id
+    );
+    var rollNo = cleanString(data.rollNumber || data.rollNo || data['Roll Number']);
+    var regRef = cleanString(data.registrationReferenceNumber || data.registrationRef || data['Registration Reference Number']);
+    var inputEmail = cleanString(data.email || data.emailAddress || data.memberEmail || data['Email Address']);
     var adminName = cleanString(data.adminName) || 'Admin';
 
     if (!feeRef && !rollNo && !regRef) {
       return createJsonResponse({
         success: false,
-        message: 'Payment transaction could not be found. Fee Reference Number, Roll Number, or Registration Reference is required.'
+        message: 'Fee reference number is required.'
       });
     }
 
@@ -2264,7 +2278,7 @@ function handleResendReceipt(data) {
       var feeData = feeSheet.getDataRange().getValues();
       var headers = feeData[0];
       var feeColMap = getFeePaymentsHeaderMap(headers);
-      var feeRefIdx = headers.indexOf('Fee Reference Number');
+      var feeRefIdx = feeColMap.feeReferenceNumber !== -1 ? feeColMap.feeReferenceNumber : headers.indexOf('Fee Reference Number');
 
       for (var i = 1; i < feeData.length; i++) {
         var row = feeData[i];
