@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Member, FeePaymentRecord, RegistrationRequest } from '../types';
+import { Member, FeePaymentRecord, RegistrationRequest, GymSettings } from '../types';
 import {
   X,
   User,
@@ -31,6 +31,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parseAmount, resolveFeePaymentFinancials } from '../lib/paymentUtils';
+import { downloadMemberCardPDF, downloadMemberInvoicePDF } from '../lib/pdf';
+import { getStoredSettings } from '../lib/storage';
 
 interface MemberDetailsModalProps {
   member: Member | null;
@@ -256,7 +258,7 @@ export const MemberDetailsModal: React.FC<MemberDetailsModalProps> = ({
                   </button>
                 )}
 
-                {onDownloadIdCard && (
+                {onDownloadIdCard ? (
                   <button
                     type="button"
                     onClick={() => onDownloadIdCard(member)}
@@ -265,7 +267,25 @@ export const MemberDetailsModal: React.FC<MemberDetailsModalProps> = ({
                     <Download className="w-3.5 h-3.5 text-zinc-400" />
                     <span>Download ID</span>
                   </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => downloadMemberCardPDF(member, getStoredSettings())}
+                    className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Download ID</span>
+                  </button>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => downloadMemberInvoicePDF(member, getStoredSettings(), memberPayments[0])}
+                  className="px-3 py-2 bg-blue-950/60 hover:bg-blue-900/60 text-blue-300 border border-blue-500/30 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Download Invoice</span>
+                </button>
 
                 {onResendIdCard && (
                   <button

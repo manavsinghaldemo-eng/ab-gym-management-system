@@ -1520,13 +1520,33 @@ function handleUpdateRegistrationStatus(data) {
       if (approvedDateIdx !== -1) regSheet.getRange(targetRowIdx, approvedDateIdx + 1).setValue(nowStr);
       if (remarksIdx !== -1 && remarks) regSheet.getRange(targetRowIdx, remarksIdx + 1).setValue(remarks);
 
-      // Create record in Members sheet
+      // Create or update record in Members sheet
       var memSheet = ss.getSheetByName(SHEETS.MEMBERS);
-
       var isPaid = (targetRowObj['Payment Status'] || '').toLowerCase() === 'successful';
       var memStatus = isPaid ? 'Active' : 'Pending Activation';
       var joinDate = targetRowObj['Joining Date'] || formatDateShort(now);
       var expDate = calculateExpiry(joinDate, 1);
+
+      var memData = memSheet.getDataRange().getValues();
+      var mHdrs = memData[0];
+      var mRollIdx = mHdrs.indexOf('Roll Number');
+      var mRegIdx = mHdrs.indexOf('Registration Reference Number');
+      var mPhoneIdx = mHdrs.indexOf('Phone Number');
+      var existingMemRow = -1;
+
+      if (memData.length > 1) {
+        var cleanTargetPhone = phone.replace(/\D/g, '');
+        for (var mi = 1; mi < memData.length; mi++) {
+          var mR = mRollIdx !== -1 ? cleanString(memData[mi][mRollIdx]).toUpperCase() : '';
+          var mRef = mRegIdx !== -1 ? cleanString(memData[mi][mRegIdx]).toUpperCase() : '';
+          var mP = mPhoneIdx !== -1 ? cleanString(memData[mi][mPhoneIdx]).replace(/\D/g, '') : '';
+
+          if ((mRef && mRef === regRef.toUpperCase()) || (mR && mR === rollNumber.toUpperCase()) || (cleanTargetPhone && mP && mP === cleanTargetPhone)) {
+            existingMemRow = mi + 1;
+            break;
+          }
+        }
+      }
 
       var memRow = [
         nowStr, // Timestamp
@@ -1539,7 +1559,7 @@ function handleUpdateRegistrationStatus(data) {
         targetRowObj['Email Address'] || '',
         targetRowObj['Address'] || '',
         targetRowObj['Emergency Contact Number'] || '',
-        targetRowObj['Selected Plan'] || 'Standard',
+        targetRowObj['Selected Plan'] || 'Standard Plan',
         targetRowObj['Fitness Goal'] || '',
         joinDate,
         joinDate, // Membership Start Date
@@ -1556,7 +1576,11 @@ function handleUpdateRegistrationStatus(data) {
         nowStr
       ];
 
-      memSheet.appendRow(memRow);
+      if (existingMemRow !== -1) {
+        memSheet.getRange(existingMemRow, 1, 1, memRow.length).setValues([memRow]);
+      } else {
+        memSheet.appendRow(memRow);
+      }
 
       // Link any existing Fee Payments records (by Registration Reference Number) to newly assigned Roll Number
       var feeSheet = ss.getSheetByName(SHEETS.FEE_PAYMENTS);
@@ -1587,7 +1611,16 @@ function handleUpdateRegistrationStatus(data) {
           fullName: targetRowObj['Full Name'],
           rollNumber: rollNumber,
           regRef: regRef,
-          selectedPlan: targetRowObj['Selected Plan']
+          phone: targetRowObj['Phone Number'],
+          email: targetRowObj['Email Address'],
+          selectedPlan: targetRowObj['Selected Plan'] || 'Standard Plan',
+          joiningDate: joinDate,
+          expiryDate: expDate,
+          address: targetRowObj['Address'] || '',
+          emergencyContact: targetRowObj['Emergency Contact Number'] || '',
+          registrationFee: targetRowObj['Registration Fee'] || 100,
+          paymentStatus: targetRowObj['Payment Status'] || 'Successful',
+          paymentMethod: targetRowObj['Payment Method'] || 'UPI'
         });
       }
 
@@ -3218,159 +3251,373 @@ function sendConfirmationEmail(type, email, details) {
     return false;
   }
   try {
-    var gymName = getSetting('gymName') || 'AB Gym Fitness Center';
+    var gymName = getSetting('gymName') || 'MS FITNESS';
+    var gymTagline = getSetting('gymTagline') || 'Stronger Body, Stronger You';
     var gymPhone = getSetting('gymPhone') || getSetting('phone') || '+91 98765 43210';
-    var gymEmail = getSetting('gymEmail') || getSetting('email') || 'support@abfitness.com';
-    var gymUpi = getSetting('upiId') || 'abfitness@upi';
+    var gymEmail = getSetting('gymEmail') || getSetting('email') || 'support@msfitness.com';
+    var gymAddress = getSetting('gymAddress') || getSetting('address') || 'Near City Center, Moradabad, UP';
+    var gymUpi = getSetting('upiId') || 'msfitness@upi';
+    var todayStr = formatDateShort(new Date());
 
     var subject = '';
     var htmlBody = '';
     var attachments = [];
 
+    // Helper CSS styles for email
+    var emailContainerStyle = 'max-width: 620px; margin: 0 auto; background-color: #0d0d12; color: #f4f4f5; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; border-radius: 16px; overflow: hidden; border: 1px solid #27272a; box-shadow: 0 10px 25px rgba(0,0,0,0.5);';
+    var emailHeaderStyle = 'background: linear-gradient(135deg, #18181b 0%, #09090b 100%); padding: 32px 24px; text-align: center; border-bottom: 2px solid #10b981;';
+    var emailCardStyle = 'background-color: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 20px; margin: 20px 0;';
+    var emailTableStyle = 'width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0;';
+    var emailTdLabel = 'padding: 8px 12px; color: #a1a1aa; border-bottom: 1px solid #27272a; font-weight: 500;';
+    var emailTdVal = 'padding: 8px 12px; color: #f4f4f5; border-bottom: 1px solid #27272a; font-weight: 600; text-align: right;';
+
     if (type === 'registration') {
-      subject = 'Registration Confirmation - ' + gymName;
-      htmlBody = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">' +
-        '<h2 style="color: #059669; margin-top: 0;">Welcome to ' + gymName + '!</h2>' +
-        '<p>Dear <strong>' + (details.fullName || 'Member') + '</strong>,</p>' +
-        '<p>Thank you for registering with ' + gymName + '. Your registration request has been submitted successfully.</p>' +
-        '<div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #10b981;">' +
-        '<p style="margin: 5px 0;"><strong>Registration Ref:</strong> ' + (details.registrationRef || details.regRef || 'N/A') + '</p>' +
-        '<p style="margin: 5px 0;"><strong>Selected Plan:</strong> ' + (details.selectedPlan || 'N/A') + '</p>' +
-        '<p style="margin: 5px 0;"><strong>Phone:</strong> ' + (details.phone || 'N/A') + '</p>' +
-        '<p style="margin: 5px 0;"><strong>Status:</strong> ' + (details.status || 'Pending Verification') + '</p>' +
+      var regRef = details.registrationRef || details.regRef || 'REG-PENDING';
+      subject = gymName + ' - Registration Acknowledgement [' + regRef + ']';
+      
+      htmlBody = '<!DOCTYPE html><html><body style="margin:0; padding:24px; background-color:#09090b;">' +
+        '<div style="' + emailContainerStyle + '">' +
+        '<div style="' + emailHeaderStyle + '">' +
+        '<h1 style="margin:0; font-size:26px; font-weight:900; letter-spacing:1px; color:#ffffff;">' + gymName.toUpperCase() + '</h1>' +
+        '<p style="margin:6px 0 0; color:#10b981; font-size:13px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase;">' + gymTagline + '</p>' +
         '</div>' +
-        '<p>Our team will verify your details and assign your Roll Number upon approval.</p>' +
-        '<p>Best regards,<br><strong>' + gymName + ' Team</strong></p>' +
-        '</div>';
-    } else if (type === 'fee_payment') {
-      var resolvedRef = details.feeRef || details.paymentRef || details.receiptNo || 'RECEIPT';
-      subject = 'AB GYM - Payment Receipt - ' + resolvedRef;
-      var memberName = details.memberName || details.fullName || 'Member';
-      var feeType = details.feeType || details.selectedPlan || details.planName || 'Membership Plan Fee';
-      var amtPaid = details.amountPaid || details.currentFeeAmount || details.feeAmount || 0;
-      var payDate = details.paymentDate || formatDateShort(new Date());
-      var payMethod = details.paymentMethod || 'UPI';
-      var payStatus = (details.status || 'SUCCESSFUL').toUpperCase();
-      var rollNum = details.rollNumber || details.regRef || 'N/A';
+        '<div style="padding:28px 24px;">' +
+        '<p style="margin:0 0 14px; font-size:16px;">Hello <strong style="color:#ffffff;">' + (details.fullName || 'Valued Athlete') + '</strong>,</p>' +
+        '<p style="margin:0 0 20px; font-size:14px; color:#a1a1aa; line-height:1.6;">Thank you for registering with <strong>' + gymName + '</strong>! Your membership application has been received and logged into our verification queue. Please find your official Registration Receipt attached.</p>' +
+        '<div style="' + emailCardStyle + '">' +
+        '<h3 style="margin:0 0 12px; font-size:14px; color:#10b981; text-transform:uppercase; letter-spacing:1px; font-weight:700;">Registration Summary</h3>' +
+        '<table style="' + emailTableStyle + '">' +
+        '<tr><td style="' + emailTdLabel + '">Registration Ref:</td><td style="' + emailTdVal + '"><span style="font-family:monospace; color:#10b981;">' + regRef + '</span></td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Applicant Name:</td><td style="' + emailTdVal + '">' + (details.fullName || 'N/A') + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Contact Phone:</td><td style="' + emailTdVal + '">' + (details.phone || 'N/A') + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Selected Plan:</td><td style="' + emailTdVal + '">' + (details.selectedPlan || 'Standard Plan') + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Registration Date:</td><td style="' + emailTdVal + '">' + todayStr + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Application Status:</td><td style="' + emailTdVal + '"><span style="color:#f59e0b;">Pending Verification</span></td></tr>' +
+        '</table>' +
+        '</div>' +
+        '<div style="background-color:#141419; border-left:4px solid #10b981; padding:14px; border-radius:4px; margin:20px 0; font-size:13px; color:#d4d4d8; line-height:1.5;">' +
+        '<strong>What\'s Next?</strong><br>Our front desk team will review your application and assign your official Member Roll Number. You may also visit our reception desk to complete biometrics, workout orientation, and locker allocation.' +
+        '</div>' +
+        '<p style="margin:24px 0 0; font-size:13px; color:#71717a; text-align:center;">For inquiries, contact front desk at <strong style="color:#a1a1aa;">' + gymPhone + '</strong> or <strong style="color:#a1a1aa;">' + gymEmail + '</strong></p>' +
+        '</div>' +
+        '<div style="background-color:#18181b; padding:16px; text-align:center; border-top:1px solid #27272a; font-size:12px; color:#71717a;">' +
+        '© ' + new Date().getFullYear() + ' ' + gymName + ' • ' + gymAddress + '<br>' + gymTagline +
+        '</div>' +
+        '</div></body></html>';
 
-      htmlBody = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 8px; background-color: #ffffff; color: #1e293b;">' +
-        '<div style="text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 18px;">' +
-        '<h2 style="color: #1e293b; margin: 0; font-size: 22px; letter-spacing: 0.5px;">' + gymName + '</h2>' +
-        '<p style="color: #64748b; margin: 3px 0 0; font-size: 12px; font-style: italic;">"Stronger Body, Stronger You"</p>' +
-        '</div>' +
-        '<p style="font-size: 14px; margin: 0 0 12px;">Dear <strong>' + memberName + '</strong>,</p>' +
-        '<p style="font-size: 14px; margin: 0 0 16px;">Please find attached your official payment receipt for AB GYM.</p>' +
-        '<div style="background-color: #f8fafc; padding: 16px; border-radius: 6px; margin: 16px 0; border-left: 4px solid #2563eb; font-size: 13px;">' +
-        '<p style="margin: 5px 0;"><strong>Payment Reference:</strong> <span style="font-family: monospace; color: #2563eb; font-weight: bold;">' + resolvedRef + '</span></p>' +
-        '<p style="margin: 5px 0;"><strong>Roll Number / ID:</strong> ' + rollNum + '</p>' +
-        '<p style="margin: 5px 0;"><strong>Fee Type:</strong> ' + feeType + '</p>' +
-        '<p style="margin: 5px 0;"><strong>Amount Paid:</strong> <span style="color: #16a34a; font-weight: bold;">₹' + amtPaid + '</span></p>' +
-        '<p style="margin: 5px 0;"><strong>Payment Method:</strong> ' + payMethod + '</p>' +
-        '<p style="margin: 5px 0;"><strong>Payment Date:</strong> ' + payDate + '</p>' +
-        '<p style="margin: 5px 0;"><strong>Status:</strong> <span style="color: #16a34a; font-weight: bold;">' + payStatus + '</span></p>' +
-        (details.receiptNo ? '<p style="margin: 5px 0;"><strong>Receipt Number:</strong> ' + details.receiptNo + '</p>' : '') +
-        '</div>' +
-        '<p style="font-size: 14px; margin: 20px 0 4px;">Thank you,</p>' +
-        '<p style="font-size: 14px; font-weight: bold; margin: 0; color: #1e293b;">AB GYM</p>' +
-        '<p style="font-size: 12px; color: #64748b; font-style: italic; margin: 2px 0 0;">"Stronger Body, Stronger You"</p>' +
-        '</div>';
-
-      // Generate Receipt PDF Blob
-      var receiptHtmlForPdf = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+      // Generate Registration PDF
+      var regHtmlForPdf = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
         '<style>' +
-        'body { font-family: Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; background: #ffffff; }' +
-        '.box { border: 2px solid #0f172a; border-radius: 8px; padding: 24px; max-width: 600px; margin: 0 auto; }' +
-        '.top { text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 16px; }' +
-        '.top h1 { margin: 0; color: #0f172a; font-size: 24px; }' +
-        '.top p { margin: 4px 0 0; color: #64748b; font-size: 12px; }' +
-        '.heading { font-size: 16px; font-weight: bold; color: #2563eb; text-align: right; margin-bottom: 14px; }' +
-        '.table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 13px; }' +
-        '.table td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }' +
-        '.table td.label { font-weight: bold; width: 40%; color: #475569; background: #f8fafc; }' +
-        '.foot { font-size: 11px; color: #94a3b8; text-align: center; margin-top: 20px; border-top: 1px dashed #cbd5e1; padding-top: 10px; }' +
+        'body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; padding: 25px; color: #1e293b; background: #ffffff; }' +
+        '.box { border: 2px solid #0f172a; border-radius: 10px; padding: 28px; max-width: 650px; margin: 0 auto; }' +
+        '.top { text-align: center; border-bottom: 2px solid #10b981; padding-bottom: 14px; margin-bottom: 18px; }' +
+        '.top h1 { margin: 0; color: #0f172a; font-size: 26px; font-weight: 900; letter-spacing: 1px; }' +
+        '.top p { margin: 4px 0 0; color: #10b981; font-size: 13px; font-weight: 700; text-transform: uppercase; }' +
+        '.badge { font-size: 14px; font-weight: bold; color: #059669; text-align: right; margin-bottom: 16px; letter-spacing: 0.5px; }' +
+        '.table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }' +
+        '.table td { padding: 9px 12px; border-bottom: 1px solid #e2e8f0; }' +
+        '.table td.label { font-weight: bold; width: 38%; color: #475569; background: #f8fafc; }' +
+        '.notice { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 12px; font-size: 12px; color: #166534; line-height: 1.5; margin-top: 15px; }' +
+        '.foot { font-size: 11px; color: #94a3b8; text-align: center; margin-top: 24px; border-top: 1px dashed #cbd5e1; padding-top: 12px; }' +
         '</style></head><body>' +
         '<div class="box">' +
-        '<div class="top"><h1>AB GYM FITNESS</h1><p>Stronger Body, Stronger You | Moradabad | Phone: ' + gymPhone + '</p></div>' +
-        '<div class="heading">OFFICIAL PAYMENT RECEIPT</div>' +
+        '<div class="top"><h1>' + gymName.toUpperCase() + '</h1><p>' + gymTagline + '</p><div style="font-size:11px; color:#64748b; margin-top:3px;">' + gymAddress + ' | Phone: ' + gymPhone + ' | Email: ' + gymEmail + '</div></div>' +
+        '<div class="badge">OFFICIAL REGISTRATION ACKNOWLEDGEMENT</div>' +
         '<table class="table">' +
-        '<tr><td class="label">Receipt / Payment Reference:</td><td>' + resolvedRef + '</td></tr>' +
-        '<tr><td class="label">Member Name:</td><td>' + memberName + '</td></tr>' +
-        '<tr><td class="label">Roll Number / ID:</td><td>' + rollNum + '</td></tr>' +
-        '<tr><td class="label">Fee Type / Plan:</td><td>' + feeType + '</td></tr>' +
-        '<tr><td class="label">Amount Paid:</td><td>₹' + amtPaid + '</td></tr>' +
-        '<tr><td class="label">Payment Method:</td><td>' + payMethod + '</td></tr>' +
-        '<tr><td class="label">Payment Date:</td><td>' + payDate + '</td></tr>' +
-        '<tr><td class="label">Payment Status:</td><td>' + payStatus + '</td></tr>' +
+        '<tr><td class="label">Registration Ref Number:</td><td><strong style="color:#0f172a; font-family:monospace;">' + regRef + '</strong></td></tr>' +
+        '<tr><td class="label">Applicant Full Name:</td><td>' + (details.fullName || 'N/A') + '</td></tr>' +
+        '<tr><td class="label">Mobile Number:</td><td>' + (details.phone || 'N/A') + '</td></tr>' +
+        '<tr><td class="label">Email Address:</td><td>' + (details.email || email) + '</td></tr>' +
+        '<tr><td class="label">Selected Membership Plan:</td><td>' + (details.selectedPlan || 'Standard') + '</td></tr>' +
+        '<tr><td class="label">Registration Date:</td><td>' + todayStr + '</td></tr>' +
+        '<tr><td class="label">Payment Status:</td><td>' + (details.paymentStatus || 'Pending Verification') + '</td></tr>' +
+        '<tr><td class="label">Verification Status:</td><td>Pending Admin Approval & Roll Number Assignment</td></tr>' +
         '</table>' +
-        '<div class="foot"><p>This is a computer-generated fee receipt from AB Gym Management Portal.</p><p>Thank you for training with AB Gym! Keep pushing your limits.</p></div>' +
+        '<div class="notice"><strong>Notice:</strong> Please keep this document reference safe. Your official Member Roll Number and Access Card will be issued upon admin verification.</div>' +
+        '<div class="foot"><p>This is an automated system generated registration document from MS Fitness Gym Management Portal.</p><p>Authorized Signatory • MS Fitness Management</p></div>' +
         '</div></body></html>';
 
       try {
-        var pdfBlob = Utilities.newBlob(receiptHtmlForPdf, 'text/html', 'ABGYM_Receipt_' + resolvedRef + '.html')
+        var regBlob = Utilities.newBlob(regHtmlForPdf, 'text/html', 'MSFITNESS_Registration_' + regRef + '.html')
           .getAs('application/pdf')
-          .setName('ABGYM_Receipt_' + resolvedRef + '.pdf');
-        attachments.push(pdfBlob);
+          .setName('MSFITNESS_Registration_' + regRef + '.pdf');
+        attachments.push(regBlob);
       } catch (pdfErr) {
-        Logger.log('PDF generation warning: ' + pdfErr.toString());
+        Logger.log('Registration PDF warning: ' + pdfErr.toString());
       }
     } else if (type === 'registration_approved') {
-      subject = 'Registration Approved & Roll Number Assigned - ' + gymName;
-      htmlBody = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #10b981; border-radius: 8px;">' +
-        '<h2 style="color: #059669; margin-top: 0;">Registration Approved!</h2>' +
-        '<p>Dear <strong>' + (details.fullName || 'Member') + '</strong>,</p>' +
-        '<p>Your registration with ' + gymName + ' has been approved by our admin team.</p>' +
-        '<div style="background-color: #ecfdf5; padding: 15px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #10b981;">' +
-        '<p style="margin: 5px 0; font-size: 16px;"><strong>Your Assigned Roll Number:</strong> <span style="color: #047857; font-family: monospace; font-size: 18px;">' + details.rollNumber + '</span></p>' +
-        '<p style="margin: 5px 0;"><strong>Registration Ref:</strong> ' + details.regRef + '</p>' +
-        '<p style="margin: 5px 0;"><strong>Plan:</strong> ' + (details.selectedPlan || 'N/A') + '</p>' +
+      var rollNum = details.rollNumber || 'ABG-MEMBER';
+      var regRef = details.regRef || details.registrationRef || 'N/A';
+      var memberName = details.fullName || 'Member';
+      var plan = details.selectedPlan || 'Standard Membership';
+      var joinDate = details.joiningDate || todayStr;
+      var expDate = details.expiryDate || calculateExpiry(joinDate, 1);
+      
+      subject = gymName + ' - Membership Approved & Welcome! [Roll No: ' + rollNum + ']';
+
+      htmlBody = '<!DOCTYPE html><html><body style="margin:0; padding:24px; background-color:#09090b;">' +
+        '<div style="' + emailContainerStyle + '">' +
+        '<div style="' + emailHeaderStyle + '">' +
+        '<div style="display:inline-block; padding:4px 12px; background-color:rgba(16,185,129,0.15); border:1px solid #10b981; border-radius:20px; font-size:12px; font-weight:700; color:#10b981; margin-bottom:8px; text-transform:uppercase;">Membership Approved</div>' +
+        '<h1 style="margin:0; font-size:26px; font-weight:900; letter-spacing:1px; color:#ffffff;">' + gymName.toUpperCase() + '</h1>' +
+        '<p style="margin:6px 0 0; color:#a1a1aa; font-size:13px; font-weight:500;">' + gymTagline + '</p>' +
         '</div>' +
-        '<p>You can now use your Roll Number to log in and manage your membership.</p>' +
-        '<p>Best regards,<br><strong>' + gymName + ' Team</strong></p>' +
-        '</div>';
+        '<div style="padding:28px 24px;">' +
+        '<p style="margin:0 0 14px; font-size:16px;">Welcome to the family, <strong style="color:#ffffff;">' + memberName + '</strong>!</p>' +
+        '<p style="margin:0 0 20px; font-size:14px; color:#a1a1aa; line-height:1.6;">Your membership has been officially approved. Your digital Member ID Card and Membership Invoice are attached to this email.</p>' +
+        
+        // ROLL NUMBER DISPLAY BADGE
+        '<div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius:12px; padding:20px; text-align:center; color:#ffffff; margin:20px 0; box-shadow:0 8px 20px rgba(16,185,129,0.25);">' +
+        '<div style="font-size:12px; text-transform:uppercase; letter-spacing:1.5px; font-weight:700; opacity:0.9;">Your Official Member Roll Number</div>' +
+        '<div style="font-size:28px; font-weight:900; letter-spacing:2px; font-family:monospace; margin:8px 0;">' + rollNum + '</div>' +
+        '<div style="font-size:12px; opacity:0.9;">Keep this Roll Number handy for check-ins and fee renewals</div>' +
+        '</div>' +
+
+        '<div style="' + emailCardStyle + '">' +
+        '<h3 style="margin:0 0 12px; font-size:14px; color:#10b981; text-transform:uppercase; letter-spacing:1px; font-weight:700;">Membership Details</h3>' +
+        '<table style="' + emailTableStyle + '">' +
+        '<tr><td style="' + emailTdLabel + '">Member Name:</td><td style="' + emailTdVal + '">' + memberName + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Roll Number:</td><td style="' + emailTdVal + '"><strong style="color:#10b981; font-family:monospace;">' + rollNum + '</strong></td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Registration Ref:</td><td style="' + emailTdVal + '">' + regRef + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Membership Plan:</td><td style="' + emailTdVal + '">' + plan + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Membership Start:</td><td style="' + emailTdVal + '">' + joinDate + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Membership Expiry:</td><td style="' + emailTdVal + '"><strong style="color:#10b981;">' + expDate + '</strong></td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Membership Status:</td><td style="' + emailTdVal + '"><span style="color:#10b981; font-weight:bold;">ACTIVE</span></td></tr>' +
+        '</table>' +
+        '</div>' +
+
+        '<div style="background-color:#18181b; border:1px solid #27272a; border-radius:12px; padding:18px; margin:20px 0;">' +
+        '<h4 style="margin:0 0 10px; font-size:13px; color:#ffffff; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">🏋️ Gym Guidelines & Next Steps</h4>' +
+        '<ul style="margin:0; padding-left:20px; font-size:13px; color:#a1a1aa; line-height:1.6;">' +
+        '<li>Carry clean training shoes, workout towel, and water bottle at all times.</li>' +
+        '<li>Display your attached Digital ID Card or quote your Roll Number at reception.</li>' +
+        '<li>Re-rack dumbbells and wipe down machines after each set.</li>' +
+        '<li>Free fitness assessment and workout roadmap available at the front desk.</li>' +
+        '</ul>' +
+        '</div>' +
+
+        '<p style="margin:24px 0 0; font-size:13px; color:#71717a; text-align:center;">Reception & Coaching Desk: <strong style="color:#a1a1aa;">' + gymPhone + '</strong> | <strong style="color:#a1a1aa;">' + gymEmail + '</strong></p>' +
+        '</div>' +
+        '<div style="background-color:#18181b; padding:16px; text-align:center; border-top:1px solid #27272a; font-size:12px; color:#71717a;">' +
+        '© ' + new Date().getFullYear() + ' ' + gymName + ' • ' + gymAddress + '<br>' + gymTagline +
+        '</div>' +
+        '</div></body></html>';
+
+      // 1. Generate Member ID Card PDF
+      var cardHtmlForPdf = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+        '<style>' +
+        'body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; padding: 20px; background: #ffffff; color: #1e293b; }' +
+        '.card-box { width: 340px; margin: 0 auto; background: #09090b; color: #ffffff; border-radius: 12px; overflow: hidden; border: 2px solid #27272a; box-shadow: 0 8px 20px rgba(0,0,0,0.3); }' +
+        '.c-head { background: linear-gradient(135deg, #18181b 0%, #09090b 100%); padding: 16px; text-align: center; border-bottom: 2px solid #10b981; }' +
+        '.c-head h2 { margin: 0; font-size: 18px; font-weight: 900; letter-spacing: 1px; color: #ffffff; }' +
+        '.c-head p { margin: 2px 0 0; font-size: 10px; color: #10b981; font-weight: 700; text-transform: uppercase; }' +
+        '.c-body { padding: 16px; font-size: 12px; }' +
+        '.c-badge { background: rgba(16,185,129,0.2); border: 1px solid #10b981; color: #10b981; font-weight: 800; font-family: monospace; font-size: 16px; padding: 6px; border-radius: 6px; text-align: center; margin-bottom: 12px; }' +
+        '.c-row { display: flex; justify-content: space-between; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px; }' +
+        '.c-lbl { color: #94a3b8; font-weight: 500; font-size: 11px; }' +
+        '.c-val { color: #f8fafc; font-weight: 700; font-size: 11px; text-align: right; }' +
+        '.c-foot { background: #18181b; padding: 10px; text-align: center; font-size: 9px; color: #94a3b8; border-top: 1px solid #27272a; }' +
+        '</style></head><body>' +
+        '<div class="card-box">' +
+        '<div class="c-head"><h2>' + gymName.toUpperCase() + '</h2><p>' + gymTagline + '</p></div>' +
+        '<div class="c-body">' +
+        '<div class="c-badge">' + rollNum + '</div>' +
+        '<table style="width:100%; font-size:11px; border-collapse:collapse;">' +
+        '<tr><td style="color:#94a3b8; padding:3px 0;">Member:</td><td style="color:#ffffff; font-weight:bold; text-align:right;">' + memberName + '</td></tr>' +
+        '<tr><td style="color:#94a3b8; padding:3px 0;">Phone:</td><td style="color:#ffffff; font-weight:bold; text-align:right;">' + (details.phone || 'N/A') + '</td></tr>' +
+        '<tr><td style="color:#94a3b8; padding:3px 0;">Plan:</td><td style="color:#ffffff; font-weight:bold; text-align:right;">' + plan + '</td></tr>' +
+        '<tr><td style="color:#94a3b8; padding:3px 0;">Valid From:</td><td style="color:#ffffff; font-weight:bold; text-align:right;">' + joinDate + '</td></tr>' +
+        '<tr><td style="color:#94a3b8; padding:3px 0;">Valid Upto:</td><td style="color:#10b981; font-weight:bold; text-align:right;">' + expDate + '</td></tr>' +
+        '<tr><td style="color:#94a3b8; padding:3px 0;">Status:</td><td style="color:#10b981; font-weight:bold; text-align:right;">ACTIVE</td></tr>' +
+        '</table>' +
+        '</div>' +
+        '<div class="c-foot">Official MS Fitness Membership Access Pass<br>' + gymAddress + ' • ' + gymPhone + '</div>' +
+        '</div></body></html>';
+
+      try {
+        var cardBlob = Utilities.newBlob(cardHtmlForPdf, 'text/html', 'MSFITNESS_MemberCard_' + rollNum + '.html')
+          .getAs('application/pdf')
+          .setName('MSFITNESS_MemberCard_' + rollNum + '.pdf');
+        attachments.push(cardBlob);
+      } catch (pdfErr) {
+        Logger.log('Member Card PDF warning: ' + pdfErr.toString());
+      }
+
+      // 2. Generate Membership Invoice PDF
+      var invHtmlForPdf = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+        '<style>' +
+        'body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; padding: 25px; color: #1e293b; background: #ffffff; }' +
+        '.box { border: 2px solid #0f172a; border-radius: 10px; padding: 28px; max-width: 650px; margin: 0 auto; }' +
+        '.top { text-align: center; border-bottom: 2px solid #10b981; padding-bottom: 14px; margin-bottom: 18px; }' +
+        '.top h1 { margin: 0; color: #0f172a; font-size: 26px; font-weight: 900; letter-spacing: 1px; }' +
+        '.top p { margin: 4px 0 0; color: #10b981; font-size: 13px; font-weight: 700; text-transform: uppercase; }' +
+        '.badge { font-size: 14px; font-weight: bold; color: #059669; text-align: right; margin-bottom: 16px; letter-spacing: 0.5px; }' +
+        '.table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }' +
+        '.table td { padding: 9px 12px; border-bottom: 1px solid #e2e8f0; }' +
+        '.table td.label { font-weight: bold; width: 38%; color: #475569; background: #f8fafc; }' +
+        '.foot { font-size: 11px; color: #94a3b8; text-align: center; margin-top: 24px; border-top: 1px dashed #cbd5e1; padding-top: 12px; }' +
+        '</style></head><body>' +
+        '<div class="box">' +
+        '<div class="top"><h1>' + gymName.toUpperCase() + '</h1><p>' + gymTagline + '</p><div style="font-size:11px; color:#64748b; margin-top:3px;">' + gymAddress + ' | Phone: ' + gymPhone + '</div></div>' +
+        '<div class="badge">MEMBERSHIP INVOICE</div>' +
+        '<table class="table">' +
+        '<tr><td class="label">Invoice Number:</td><td><strong style="font-family:monospace; color:#0f172a;">INV-' + rollNum + '-' + Date.now().toString().slice(-4) + '</strong></td></tr>' +
+        '<tr><td class="label">Invoice Date:</td><td>' + todayStr + '</td></tr>' +
+        '<tr><td class="label">Member Full Name:</td><td>' + memberName + '</td></tr>' +
+        '<tr><td class="label">Roll Number:</td><td><strong style="color:#059669; font-family:monospace;">' + rollNum + '</strong></td></tr>' +
+        '<tr><td class="label">Registration Ref:</td><td>' + regRef + '</td></tr>' +
+        '<tr><td class="label">Membership Plan:</td><td>' + plan + '</td></tr>' +
+        '<tr><td class="label">Membership Validity:</td><td>' + joinDate + ' to ' + expDate + '</td></tr>' +
+        '<tr><td class="label">Registration / Plan Fee:</td><td><strong style="color:#059669; font-size:15px;">₹' + (details.registrationFee || 100) + '</strong></td></tr>' +
+        '<tr><td class="label">Payment Status:</td><td>' + (details.paymentStatus || 'Successful') + '</td></tr>' +
+        '<tr><td class="label">Payment Method:</td><td>' + (details.paymentMethod || 'UPI') + '</td></tr>' +
+        '</table>' +
+        '<div class="foot"><p>Thank you for choosing MS Fitness. Keep pushing your limits!</p><p>Authorized Signatory • MS Fitness</p></div>' +
+        '</div></body></html>';
+
+      try {
+        var invBlob = Utilities.newBlob(invHtmlForPdf, 'text/html', 'MSFITNESS_Invoice_' + rollNum + '.html')
+          .getAs('application/pdf')
+          .setName('MSFITNESS_Invoice_' + rollNum + '.pdf');
+        attachments.push(invBlob);
+      } catch (pdfErr) {
+        Logger.log('Invoice PDF warning: ' + pdfErr.toString());
+      }
+    } else if (type === 'fee_payment') {
+      var resolvedRef = details.feeRef || details.paymentRef || details.feeReferenceNumber || details.receiptNo || ('FEE-' + Date.now().toString().slice(-6));
+      subject = gymName + ' - Payment Receipt [' + resolvedRef + ']';
+      var memberName = details.memberName || details.fullName || 'Member';
+      var feeType = details.feeType || details.selectedPlan || details.planName || 'Monthly Membership Fee';
+      var amtPaid = details.amountPaid || details.currentFeeAmount || details.feeAmount || 0;
+      var totalPayable = details.totalPayableAmount || amtPaid;
+      var remainingBal = details.remainingBalance || 0;
+      var payDate = details.paymentDate || todayStr;
+      var payMethod = details.paymentMethod || 'UPI';
+      var payStatus = (details.status || 'SUCCESSFUL').toUpperCase();
+      var rollNum = details.rollNumber || details.regRef || 'N/A';
+      var receiptNo = details.receiptNo || ('MSF-REC-' + resolvedRef.replace(/[^A-Za-z0-9]/g, '').slice(-8));
+
+      htmlBody = '<!DOCTYPE html><html><body style="margin:0; padding:24px; background-color:#09090b;">' +
+        '<div style="' + emailContainerStyle + '">' +
+        '<div style="' + emailHeaderStyle + '">' +
+        '<div style="display:inline-block; padding:4px 12px; background-color:rgba(16,185,129,0.15); border:1px solid #10b981; border-radius:20px; font-size:12px; font-weight:700; color:#10b981; margin-bottom:8px; text-transform:uppercase;">Payment Receipt</div>' +
+        '<h1 style="margin:0; font-size:26px; font-weight:900; letter-spacing:1px; color:#ffffff;">' + gymName.toUpperCase() + '</h1>' +
+        '<p style="margin:6px 0 0; color:#a1a1aa; font-size:13px; font-weight:500;">' + gymTagline + '</p>' +
+        '</div>' +
+        '<div style="padding:28px 24px;">' +
+        '<p style="margin:0 0 14px; font-size:16px;">Dear <strong style="color:#ffffff;">' + memberName + '</strong>,</p>' +
+        '<p style="margin:0 0 20px; font-size:14px; color:#a1a1aa; line-height:1.6;">Thank you for your fee payment. Please find your official payment receipt details below and attached as a PDF document.</p>' +
+        
+        '<div style="' + emailCardStyle + '">' +
+        '<div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #27272a; padding-bottom:10px; margin-bottom:12px;">' +
+        '<span style="font-size:13px; color:#a1a1aa; text-transform:uppercase; font-weight:700;">Receipt Ref</span>' +
+        '<span style="font-family:monospace; color:#10b981; font-weight:bold; font-size:14px;">' + resolvedRef + '</span>' +
+        '</div>' +
+        '<table style="' + emailTableStyle + '">' +
+        '<tr><td style="' + emailTdLabel + '">Member Name:</td><td style="' + emailTdVal + '">' + memberName + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Roll Number / ID:</td><td style="' + emailTdVal + '"><strong style="color:#10b981; font-family:monospace;">' + rollNum + '</strong></td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Fee Category:</td><td style="' + emailTdVal + '">' + feeType + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Amount Paid:</td><td style="' + emailTdVal + '"><strong style="color:#10b981; font-size:16px;">₹' + amtPaid + '</strong></td></tr>' +
+        (remainingBal > 0 ? '<tr><td style="' + emailTdLabel + '">Remaining Balance:</td><td style="' + emailTdVal + '"><span style="color:#ef4444;">₹' + remainingBal + '</span></td></tr>' : '') +
+        '<tr><td style="' + emailTdLabel + '">Payment Method:</td><td style="' + emailTdVal + '">' + payMethod + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Payment Date:</td><td style="' + emailTdVal + '">' + payDate + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Transaction Status:</td><td style="' + emailTdVal + '"><span style="color:#10b981; font-weight:bold;">' + payStatus + '</span></td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Receipt Number:</td><td style="' + emailTdVal + '">' + receiptNo + '</td></tr>' +
+        '</table>' +
+        '</div>' +
+
+        '<p style="margin:24px 0 0; font-size:13px; color:#71717a; text-align:center;">MS Fitness Front Desk: <strong style="color:#a1a1aa;">' + gymPhone + '</strong> | <strong style="color:#a1a1aa;">' + gymEmail + '</strong></p>' +
+        '</div>' +
+        '<div style="background-color:#18181b; padding:16px; text-align:center; border-top:1px solid #27272a; font-size:12px; color:#71717a;">' +
+        '© ' + new Date().getFullYear() + ' ' + gymName + ' • ' + gymAddress + '<br>' + gymTagline +
+        '</div>' +
+        '</div></body></html>';
+
+      // Generate Payment Receipt PDF
+      var receiptHtmlForPdf = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+        '<style>' +
+        'body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; padding: 25px; color: #1e293b; background: #ffffff; }' +
+        '.box { border: 2px solid #0f172a; border-radius: 10px; padding: 28px; max-width: 650px; margin: 0 auto; }' +
+        '.top { text-align: center; border-bottom: 2px solid #10b981; padding-bottom: 14px; margin-bottom: 18px; }' +
+        '.top h1 { margin: 0; color: #0f172a; font-size: 26px; font-weight: 900; letter-spacing: 1px; }' +
+        '.top p { margin: 4px 0 0; color: #10b981; font-size: 13px; font-weight: 700; text-transform: uppercase; }' +
+        '.heading { font-size: 14px; font-weight: bold; color: #059669; text-align: right; margin-bottom: 16px; letter-spacing: 0.5px; }' +
+        '.table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }' +
+        '.table td { padding: 9px 12px; border-bottom: 1px solid #e2e8f0; }' +
+        '.table td.label { font-weight: bold; width: 38%; color: #475569; background: #f8fafc; }' +
+        '.foot { font-size: 11px; color: #94a3b8; text-align: center; margin-top: 24px; border-top: 1px dashed #cbd5e1; padding-top: 12px; }' +
+        '</style></head><body>' +
+        '<div class="box">' +
+        '<div class="top"><h1>' + gymName.toUpperCase() + '</h1><p>' + gymTagline + '</p><div style="font-size:11px; color:#64748b; margin-top:3px;">' + gymAddress + ' | Phone: ' + gymPhone + '</div></div>' +
+        '<div class="heading">OFFICIAL FEE PAYMENT RECEIPT</div>' +
+        '<table class="table">' +
+        '<tr><td class="label">Fee Reference Number:</td><td><strong style="color:#0f172a; font-family:monospace;">' + resolvedRef + '</strong></td></tr>' +
+        '<tr><td class="label">Receipt Number:</td><td>' + receiptNo + '</td></tr>' +
+        '<tr><td class="label">Member Full Name:</td><td>' + memberName + '</td></tr>' +
+        '<tr><td class="label">Roll Number:</td><td><strong style="color:#059669; font-family:monospace;">' + rollNum + '</strong></td></tr>' +
+        '<tr><td class="label">Fee Type / Plan:</td><td>' + feeType + '</td></tr>' +
+        '<tr><td class="label">Amount Paid:</td><td><strong style="color:#059669; font-size:16px;">₹' + amtPaid + '</strong></td></tr>' +
+        (remainingBal > 0 ? '<tr><td class="label">Remaining Balance:</td><td style="color:#ef4444; font-weight:bold;">₹' + remainingBal + '</td></tr>' : '') +
+        '<tr><td class="label">Payment Mode:</td><td>' + payMethod + '</td></tr>' +
+        '<tr><td class="label">Payment Date:</td><td>' + payDate + '</td></tr>' +
+        '<tr><td class="label">Payment Status:</td><td><strong style="color:#059669;">' + payStatus + '</strong></td></tr>' +
+        '</table>' +
+        '<div class="foot"><p>This is an authentic computer-generated receipt from MS Fitness Gym Management Portal.</p><p>Thank you for training with MS Fitness! Keep pushing your limits.</p></div>' +
+        '</div></body></html>';
+
+      try {
+        var pdfBlob = Utilities.newBlob(receiptHtmlForPdf, 'text/html', 'MSFITNESS_Receipt_' + resolvedRef + '.html')
+          .getAs('application/pdf')
+          .setName('MSFITNESS_Receipt_' + resolvedRef + '.pdf');
+        attachments.push(pdfBlob);
+      } catch (pdfErr) {
+        Logger.log('Receipt PDF generation warning: ' + pdfErr.toString());
+      }
     } else if (type === 'payment_reminder') {
       var isOverdue = details.isOverdue === true;
       var hasBal = details.hasBalance === true;
-      var statusColor = isOverdue ? '#dc2626' : (hasBal ? '#d97706' : '#2563eb');
-      var statusBg = isOverdue ? '#fef2f2' : (hasBal ? '#fffbeb' : '#eff6ff');
+      var statusColor = isOverdue ? '#ef4444' : (hasBal ? '#f59e0b' : '#10b981');
+      var statusBg = isOverdue ? '#fef2f2' : (hasBal ? '#fffbeb' : '#ecfdf5');
       var statusTitle = isOverdue ? '⚠️ Membership Payment Overdue' : (hasBal ? '⏳ Pending Balance Reminder' : '🔔 Membership Renewal Reminder');
+      var rollNum = details.rollNumber || 'Member';
       
-      subject = statusTitle + ' [' + (details.rollNumber || 'Member') + '] - ' + gymName;
+      subject = statusTitle + ' [' + rollNum + '] - ' + gymName;
       
-      htmlBody = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px;">' +
-        '<div style="max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border: 1px solid #e2e8f0;">' +
-        '<div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 24px; text-align: center; color: #ffffff;">' +
-        '<h1 style="margin: 0; font-size: 22px; letter-spacing: 1px; color: #f59e0b; font-weight: 800;">' + gymName.toUpperCase() + '</h1>' +
-        '<p style="margin: 4px 0 0 0; font-size: 13px; color: #94a3b8; letter-spacing: 0.5px;">OFFICIAL PAYMENT NOTIFICATION</p>' +
+      htmlBody = '<!DOCTYPE html><html><body style="margin:0; padding:24px; background-color:#09090b;">' +
+        '<div style="' + emailContainerStyle + '">' +
+        '<div style="' + emailHeaderStyle + '">' +
+        '<h1 style="margin:0; font-size:26px; font-weight:900; letter-spacing:1px; color:#ffffff;">' + gymName.toUpperCase() + '</h1>' +
+        '<p style="margin:6px 0 0; color:#a1a1aa; font-size:13px; font-weight:500;">' + gymTagline + '</p>' +
         '</div>' +
-        '<div style="background-color: ' + statusBg + '; padding: 14px 20px; border-bottom: 2px solid ' + statusColor + '; text-align: center;">' +
-        '<span style="font-size: 15px; font-weight: 700; color: ' + statusColor + ';">' + statusTitle + '</span>' +
+        '<div style="background-color:' + (isOverdue ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)') + '; padding:14px 20px; border-bottom:2px solid ' + statusColor + '; text-align:center;">' +
+        '<span style="font-size:15px; font-weight:700; color:' + statusColor + ';">' + statusTitle + '</span>' +
         '</div>' +
-        '<div style="padding: 24px;">' +
-        '<p style="margin: 0 0 16px 0; font-size: 15px; color: #334155;">Dear <strong>' + (details.fullName || 'Member') + '</strong>,</p>' +
-        '<p style="margin: 0 0 18px 0; font-size: 14px; color: #475569; line-height: 1.6;">' +
+        '<div style="padding:28px 24px;">' +
+        '<p style="margin:0 0 14px; font-size:16px;">Dear <strong style="color:#ffffff;">' + (details.fullName || 'Member') + '</strong>,</p>' +
+        '<p style="margin:0 0 20px; font-size:14px; color:#a1a1aa; line-height:1.6;">' +
         (isOverdue 
-          ? 'This is a courteous reminder that your gym membership at <strong>' + gymName + '</strong> has expired or has an overdue balance. To maintain uninterrupted access to gym facilities and personal training sessions, please clear your outstanding dues at your earliest convenience.' 
-          : 'This is an advance reminder that your gym membership at <strong>' + gymName + '</strong> is scheduled for renewal soon. Renewing on time guarantees continuous access to all fitness equipment, workout zones, and coaching support.') +
+          ? 'This is a friendly reminder that your membership at <strong>' + gymName + '</strong> is overdue. To maintain uninterrupted access to workouts and training, please clear your outstanding dues.' 
+          : 'This is an advance notice that your membership at <strong>' + gymName + '</strong> is due for renewal soon. Renew on time to keep achieving your fitness milestones without interruption!') +
         '</p>' +
-        '<div style="background-color: #f8fafc; border-radius: 8px; padding: 16px; margin-bottom: 20px; border: 1px solid #e2e8f0;">' +
-        '<table style="width: 100%; border-collapse: collapse; font-size: 14px;">' +
-        '<tr><td style="padding: 6px 0; color: #64748b;">Roll Number:</td><td style="padding: 6px 0; font-weight: 700; text-align: right; color: #0f172a; font-family: monospace;">' + (details.rollNumber || 'N/A') + '</td></tr>' +
-        '<tr><td style="padding: 6px 0; color: #64748b;">Membership Plan:</td><td style="padding: 6px 0; font-weight: 600; text-align: right; color: #0f172a;">' + (details.selectedPlan || 'Gym Plan') + '</td></tr>' +
-        '<tr><td style="padding: 6px 0; color: #64748b;">Due / Expiry Date:</td><td style="padding: 6px 0; font-weight: 700; text-align: right; color: ' + statusColor + ';">' + (details.expiryDate || 'Immediate') + '</td></tr>' +
-        '<tr><td style="padding: 6px 0; color: #64748b;">Payable Amount:</td><td style="padding: 6px 0; font-weight: 800; font-size: 18px; text-align: right; color: #059669;">₹' + (details.dueAmount || details.balance || 999) + '</td></tr>' +
+        '<div style="' + emailCardStyle + '">' +
+        '<table style="' + emailTableStyle + '">' +
+        '<tr><td style="' + emailTdLabel + '">Roll Number:</td><td style="' + emailTdVal + '"><strong style="color:#10b981; font-family:monospace;">' + rollNum + '</strong></td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Membership Plan:</td><td style="' + emailTdVal + '">' + (details.selectedPlan || 'Standard Plan') + '</td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Due / Expiry Date:</td><td style="' + emailTdVal + '"><strong style="color:' + statusColor + ';">' + (details.expiryDate || 'Immediate') + '</strong></td></tr>' +
+        '<tr><td style="' + emailTdLabel + '">Payable Amount:</td><td style="' + emailTdVal + '"><strong style="font-size:18px; color:#10b981;">₹' + (details.dueAmount || details.balance || 999) + '</strong></td></tr>' +
         '</table>' +
         '</div>' +
-        '<div style="background-color: #f0fdf4; border-radius: 8px; padding: 16px; border: 1px solid #bbf7d0; margin-bottom: 20px;">' +
-        '<h4 style="margin: 0 0 8px 0; color: #166534; font-size: 14px; font-weight: 700;">💳 Quick Online Payment (UPI)</h4>' +
-        '<p style="margin: 0 0 6px 0; font-size: 13px; color: #15803d;">Pay via Google Pay, PhonePe, Paytm, or BHIM to:</p>' +
-        '<p style="margin: 0; font-family: monospace; font-size: 15px; font-weight: 800; color: #14532d; background: #dcfce7; padding: 6px 10px; border-radius: 4px; display: inline-block;">' + gymUpi + '</p>' +
-        '<p style="margin: 8px 0 0 0; font-size: 12px; color: #166534;">Or visit the gym front desk to pay via Cash / QR Code.</p>' +
+        '<div style="background-color:#18181b; border:1px solid #10b981; border-radius:12px; padding:18px; margin:20px 0; text-align:center;">' +
+        '<h4 style="margin:0 0 8px; color:#10b981; font-size:14px; font-weight:700;">💳 Quick UPI Payment</h4>' +
+        '<p style="margin:0 0 10px; font-size:13px; color:#a1a1aa;">Pay via Google Pay, PhonePe, Paytm, or BHIM to UPI ID:</p>' +
+        '<div style="font-family:monospace; font-size:16px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.1); padding:8px 16px; border-radius:6px; display:inline-block; border:1px dashed #10b981;">' + gymUpi + '</div>' +
+        '<p style="margin:10px 0 0; font-size:12px; color:#71717a;">Or visit the front desk to pay via Cash or Counter QR.</p>' +
         '</div>' +
-        (details.customNote ? '<p style="font-size: 13px; color: #64748b; font-style: italic; margin-bottom: 16px;"><strong>Note from Gym:</strong> ' + details.customNote + '</p>' : '') +
-        '<p style="font-size: 13px; color: #64748b; margin: 0; line-height: 1.5;">For assistance, fee adjustments, or queries, please contact our front desk at <strong>' + gymPhone + '</strong> or email <strong>' + gymEmail + '</strong>.</p>' +
+        (details.customNote ? '<p style="font-size:13px; color:#a1a1aa; font-style:italic; margin-bottom:16px;"><strong>Note from Gym:</strong> ' + details.customNote + '</p>' : '') +
+        '<p style="font-size:13px; color:#71717a; text-align:center; margin:20px 0 0;">Questions? Contact front desk at <strong style="color:#a1a1aa;">' + gymPhone + '</strong> or <strong style="color:#a1a1aa;">' + gymEmail + '</strong></p>' +
         '</div>' +
-        '<div style="background-color: #f1f5f9; padding: 14px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b;">' +
-        '© ' + new Date().getFullYear() + ' ' + gymName + ' • Keeping You Strong & Fit' +
+        '<div style="background-color:#18181b; padding:16px; text-align:center; border-top:1px solid #27272a; font-size:12px; color:#71717a;">' +
+        '© ' + new Date().getFullYear() + ' ' + gymName + ' • ' + gymAddress + '<br>' + gymTagline +
         '</div></div></body></html>';
     }
 

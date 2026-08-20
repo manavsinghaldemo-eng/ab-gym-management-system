@@ -1,10 +1,21 @@
 import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
-import { FeePaymentRecord, Member, GymSettings } from '../types';
+import { FeePaymentRecord, Member, GymSettings, RegistrationRequest } from '../types';
 import { AB_GYM_LOGO_BASE64 } from './logoBase64';
-import { resolveFeePaymentFinancials } from './paymentUtils';
+import { resolveFeePaymentFinancials, parseAmount } from './paymentUtils';
 
-export function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSettings) {
+// Helper to format currency
+function formatINR(val: number | string | undefined): string {
+  const num = typeof val === 'number' ? val : Number(val || 0);
+  return '₹' + (isNaN(num) ? 0 : num).toLocaleString('en-IN');
+}
+
+/**
+ * 1. ADVANCED PAYMENT RECEIPT PDF
+ * High-contrast, luxury branded official payment receipt with QR verification,
+ * itemized financials, digital signature/stamp, and gym terms.
+ */
+export async function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSettings) {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -13,210 +24,685 @@ export function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: GymSet
 
   const fin = resolveFeePaymentFinancials(record);
 
-  const blueColor = [37, 99, 235]; // #2563EB
-  const darkColor = [20, 20, 25]; // #141419
-  const grayColor = [100, 100, 105];
+  const primaryDark = [15, 23, 42]; // #0F172A (Deep Slate)
+  const brandEmerald = [16, 185, 129]; // #10B981
+  const brandBlue = [37, 99, 235]; // #2563EB
+  const textMuted = [100, 116, 139]; // #64748B
+  const textDark = [30, 41, 59]; // #1E293B
+  const bgLight = [248, 250, 252]; // #F8FAFC
+  const borderColor = [226, 232, 240]; // #E2E8F0
 
-  // Header Banner
-  doc.setFillColor(darkColor[0], darkColor[1], darkColor[2]);
-  doc.rect(0, 0, 210, 48, 'F');
+  const gymName = (settings.gymName || 'MS FITNESS').toUpperCase();
+  const gymTagline = settings.tagline || 'Stronger Body, Stronger You';
+  const gymPhone = settings.phone || '+91 85878 82431';
+  const gymEmail = settings.email || 'support@msfitness.com';
+  const gymAddress = settings.address || 'MS Fitness Complex, New Delhi - 110075';
+  const feeRef = record.feeReferenceNumber || record.id || 'N/A';
+  const rollNumber = record.rollNumber || 'Unassigned (Pending Verification)';
+  const regRef = record.registrationReferenceNumber || record.registrationRef || 'N/A';
+  const memberName = (record.memberName || record.fullName || 'Valued Member').trim();
+  const memberPhone = record.phoneNumber || record.memberPhone || record.phone || 'N/A';
+  const memberEmail = record.emailAddress || record.memberEmail || record.email || 'N/A';
+  const payDate = record.paymentDate || record.timestamp || new Date().toISOString().split('T')[0];
 
-  // Blue accent line
-  doc.setFillColor(blueColor[0], blueColor[1], blueColor[2]);
-  doc.rect(0, 46, 210, 2, 'F');
+  // 1. Top Header Banner
+  doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+  doc.rect(0, 0, 210, 46, 'F');
 
-  // Add Official Logo Image
+  // Accent Line
+  doc.setFillColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.rect(0, 44.5, 210, 1.5, 'F');
+
+  // Official Logo
   try {
-    doc.addImage(AB_GYM_LOGO_BASE64, 'JPEG', 12, 6, 32, 32);
+    doc.addImage(AB_GYM_LOGO_BASE64, 'JPEG', 14, 7, 30, 30);
   } catch (err) {
-    console.warn('Could not render logo in PDF:', err);
-  }
-
-  // Title
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(22);
-  doc.text(settings.gymName || 'AB GYM', 48, 18);
-
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.text(settings.tagline || 'Stronger Body, Stronger You', 48, 25);
-  doc.text(`Phone: ${settings.phone || '+91 98765 43210'} | Email: ${settings.email || 'abgym@gmail.com'}`, 48, 31);
-  doc.text(settings.address || 'Civil Lines, Near Stadium, Moradabad', 48, 37);
-
-  // Receipt Label Right Aligned
-  doc.setTextColor(blueColor[0], blueColor[1], blueColor[2]);
-  doc.setFontSize(16);
-  doc.setFont('helvetica', 'bold');
-  doc.text('FEE PAYMENT RECEIPT', 195, 22, { align: 'right' });
-
-  doc.setTextColor(200, 200, 200);
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Ref #: ${record.feeReferenceNumber}`, 195, 30, { align: 'right' });
-  doc.text(`Date: ${record.paymentDate}`, 195, 36, { align: 'right' });
-
-  // Member & Payment Details Container Box
-  doc.setFillColor(248, 249, 250);
-  doc.setDrawColor(220, 220, 225);
-  doc.roundedRect(15, 55, 180, 50, 3, 3, 'FD');
-
-  doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'bold');
-  doc.text('MEMBER DETAILS', 20, 65);
-
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Reg Ref:', 20, 74);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(blueColor[0], blueColor[1], blueColor[2]);
-  doc.text(record.registrationRef || 'N/A', 50, 74);
-
-  doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Roll Number:', 20, 82);
-  doc.setFont('helvetica', 'normal');
-  doc.text(record.rollNumber || 'Unassigned (Pending Approval)', 50, 82);
-
-  doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Member Name:', 20, 82);
-  doc.setFont('helvetica', 'normal');
-  doc.text(record.memberName, 50, 82);
-
-  doc.setFont('helvetica', 'bold');
-  doc.text('Phone Number:', 20, 90);
-  doc.setFont('helvetica', 'normal');
-  doc.text(record.memberPhone, 50, 90);
-
-  doc.setFont('helvetica', 'bold');
-  doc.text('Email:', 20, 98);
-  doc.setFont('helvetica', 'normal');
-  doc.text(record.memberEmail || 'N/A', 50, 98);
-
-  // Right Side - Membership Plan Info
-  doc.setFont('helvetica', 'bold');
-  doc.text('Selected Plan:', 110, 74);
-  doc.setFont('helvetica', 'normal');
-  doc.text(fin.planName || record.planName || 'Plan', 145, 74);
-
-  doc.setFont('helvetica', 'bold');
-  doc.text('New Expiry Date:', 110, 82);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(0, 128, 0);
-  doc.text(record.newExpiryDate, 145, 82);
-
-  doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Payment Status:', 110, 90);
-  doc.setFont('helvetica', 'normal');
-  doc.text(fin.status || record.status, 145, 90);
-
-  // Financial Breakdown Table
-  let y = 115;
-  doc.setFillColor(darkColor[0], darkColor[1], darkColor[2]);
-  doc.rect(15, y, 180, 10, 'F');
-
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.text('DESCRIPTION', 20, y + 7);
-  doc.text('PAYMENT METHOD', 100, y + 7);
-  doc.text('AMOUNT (₹)', 190, y + 7, { align: 'right' });
-
-  y += 10;
-  doc.setFillColor(255, 255, 255);
-  doc.rect(15, y, 180, 12, 'F');
-  doc.setDrawColor(220, 220, 225);
-  doc.line(15, y + 12, 195, y + 12);
-
-  doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Membership Fee Renewal (${fin.planName || record.planName || record.selectedPlan || 'Plan'})`, 20, y + 8);
-  doc.text((record.paymentMethod || 'UPI') + (record.upiTxnId ? ` (${record.upiTxnId})` : ''), 100, y + 8);
-  doc.setFont('helvetica', 'bold');
-  const amtPaid = fin.amountPaid;
-  doc.text(`₹${amtPaid.toLocaleString('en-IN')}`, 190, y + 8, { align: 'right' });
-
-  // Summary Rows
-  y += 18;
-  doc.setFont('helvetica', 'normal');
-  doc.text('Previous Balance:', 130, y);
-  doc.text(`₹${fin.previousBalance.toLocaleString('en-IN')}`, 190, y, { align: 'right' });
-
-  y += 6;
-  doc.setFont('helvetica', 'normal');
-  const totalPayable = fin.totalPayableAmount;
-  doc.text('Total Payable Amount:', 130, y);
-  doc.text(`₹${totalPayable.toLocaleString('en-IN')}`, 190, y, { align: 'right' });
-
-  y += 6;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text('Amount Paid:', 130, y);
-  doc.setTextColor(blueColor[0], blueColor[1], blueColor[2]);
-  doc.text(`₹${amtPaid.toLocaleString('en-IN')}`, 190, y, { align: 'right' });
-
-  y += 6;
-  doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  const remBal = fin.remainingBalance;
-  doc.text('Remaining Balance:', 130, y);
-  if (remBal > 0) {
-    doc.setTextColor(220, 100, 0);
-  }
-  doc.text(`₹${remBal.toLocaleString('en-IN')}`, 190, y, { align: 'right' });
-
-  y += 6;
-  doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
-  doc.setFont('helvetica', 'normal');
-  doc.text('Payment Type:', 130, y);
-  const payType = fin.paymentType;
-  doc.text(payType, 190, y, { align: 'right' });
-
-  // Notes / Remarks Box
-  if (record.remarks) {
-    y += 15;
-    doc.setFillColor(245, 245, 248);
-    doc.rect(15, y, 180, 18, 'F');
+    console.warn('Could not render logo in Receipt PDF:', err);
+    doc.setFillColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+    doc.roundedRect(14, 7, 30, 30, 3, 3, 'F');
+    doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
-    doc.text('Remarks / Note:', 20, y + 6);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
-    doc.text(record.remarks, 20, y + 12);
+    doc.setFontSize(16);
+    doc.text('MS', 29, 26, { align: 'center' });
   }
 
-  // Stamp / Verification Footer
-  y = 230;
-  doc.setDrawColor(200, 200, 200);
-  doc.line(15, y, 195, y);
+  // Header Gym Info
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.text(gymName, 48, 18);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.text(gymTagline, 48, 24);
+
+  doc.setTextColor(203, 213, 225); // Slate 300
+  doc.setFontSize(8);
+  doc.text(`Phone: ${gymPhone}  |  Email: ${gymEmail}`, 48, 30);
+  doc.text(gymAddress, 48, 36);
+
+  // Right Receipt Header Box
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text('PAYMENT RECEIPT', 196, 18, { align: 'right' });
+
+  doc.setFillColor(30, 41, 59);
+  doc.roundedRect(124, 23, 72, 16, 2, 2, 'F');
+
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`RECEIPT REF: ${feeRef}`, 192, 29, { align: 'right' });
+
+  doc.setTextColor(203, 213, 225);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(`DATE: ${payDate}`, 192, 35, { align: 'right' });
+
+  // 2. Member & Membership Information Cards (2 Columns)
+  let y = 52;
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.setLineWidth(0.4);
+  doc.roundedRect(14, y, 88, 44, 3, 3, 'FD');
+  doc.roundedRect(108, y, 88, 44, 3, 3, 'FD');
+
+  // Left Card: Member Details
+  doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+  doc.roundedRect(14, y, 88, 8, 3, 3, 'F');
+  doc.rect(14, y + 4, 88, 4, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text('MEMBER DETAILS', 18, y + 5.5);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Full Name:', 18, y + 14);
+  doc.text('Roll / Member ID:', 18, y + 20);
+  doc.text('Registration Ref:', 18, y + 26);
+  doc.text('Contact Phone:', 18, y + 32);
+  doc.text('Email Address:', 18, y + 38);
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.text(memberName, 46, y + 14);
+  doc.setTextColor(brandBlue[0], brandBlue[1], brandBlue[2]);
+  doc.text(rollNumber, 46, y + 20);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.text(regRef, 46, y + 26);
+  doc.text(memberPhone, 46, y + 32);
+  doc.text(memberEmail, 46, y + 38);
+
+  // Right Card: Subscription Status
+  doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+  doc.roundedRect(108, y, 88, 8, 3, 3, 'F');
+  doc.rect(108, y + 4, 88, 4, 'F');
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text('SUBSCRIPTION & VALIDITY', 112, y + 5.5);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Membership Plan:', 112, y + 14);
+  doc.text('Validity Expiry:', 112, y + 20);
+  doc.text('Payment Method:', 112, y + 26);
+  doc.text('Payment Mode / Type:', 112, y + 32);
+  doc.text('Verification Status:', 112, y + 38);
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.text(fin.planName || record.planName || 'Standard Plan', 146, y + 14);
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.text(record.newExpiryDate || 'Active Subscription', 146, y + 20);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.text(record.paymentMethod || 'UPI Payment', 146, y + 26);
+  doc.text(fin.paymentType || 'Full Payment', 146, y + 32);
+
+  const isApproved = fin.isApproved;
+  doc.setTextColor(isApproved ? 16 : 217, isApproved ? 185 : 119, isApproved ? 129 : 6);
+  doc.setFont('helvetica', 'bold');
+  doc.text(fin.status || 'VERIFIED', 146, y + 38);
+
+  // 3. Itemized Financial Breakdown Table
+  y = 102;
+  doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+  doc.rect(14, y, 182, 8.5, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text('ITEM DESCRIPTION', 18, y + 5.5);
+  doc.text('PAYMENT DETAILS', 95, y + 5.5);
+  doc.text('AMOUNT (INR)', 190, y + 5.5, { align: 'right' });
+
+  y += 8.5;
+  // Row 1: Plan Fee Item
+  doc.setFillColor(255, 255, 255);
+  doc.rect(14, y, 182, 12, 'F');
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.line(14, y + 12, 196, y + 12);
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text(`Gym Membership Fee — ${fin.planName || record.planName || 'Plan'}`, 18, y + 5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.text(`Period Renewal • Ref: ${feeRef}`, 18, y + 9.5);
+
+  const txnId = record.upiTransactionId || record.upiTxnId || record.transactionId;
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.text(`${record.paymentMethod || 'UPI'}${txnId ? ' (Txn: ' + txnId + ')' : ''}`, 95, y + 7);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
-  doc.text('AUTHORIZED SIGNATURE & STAMP', 195, y + 15, { align: 'right' });
+  doc.setFontSize(9);
+  doc.text(formatINR(fin.currentFeeAmount), 190, y + 7, { align: 'right' });
 
-  doc.setFont('helvetica', 'italic');
+  // 4. Financial Calculations Box & QR Code
+  y += 16;
+  const summaryBoxY = y;
+
+  // Financial Summary Rows (Right Side)
+  const rightColX = 120;
+  const rightValX = 190;
+  let subY = y;
+
   doc.setFontSize(8);
-  doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
-  doc.text('This is a computer-generated fee receipt from AB Gym portal. No signature required.', 15, y + 25);
-  doc.text('Thank you for training with AB Gym! Keep pushing your limits.', 15, y + 30);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.text('Plan Fee Amount:', rightColX, subY);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.text(formatINR(fin.currentFeeAmount), rightValX, subY, { align: 'right' });
 
-  doc.save(`ABGYM_Receipt_${record.feeReferenceNumber}.pdf`);
+  if (parseAmount(record.discountAmount || 0) > 0) {
+    subY += 5;
+    doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+    doc.text('Special Concession / Discount:', rightColX, subY);
+    doc.setTextColor(16, 185, 129);
+    doc.text('- ' + formatINR(record.discountAmount), rightValX, subY, { align: 'right' });
+  }
+
+  if (fin.previousBalance > 0) {
+    subY += 5;
+    doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+    doc.text('Outstanding Previous Balance:', rightColX, subY);
+    doc.setTextColor(217, 119, 6);
+    doc.text('+ ' + formatINR(fin.previousBalance), rightValX, subY, { align: 'right' });
+  }
+
+  subY += 5.5;
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.line(rightColX, subY - 1, 196, subY - 1);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.text('Total Payable Amount:', rightColX, subY + 3);
+  doc.text(formatINR(fin.totalPayableAmount), rightValX, subY + 3, { align: 'right' });
+
+  subY += 8;
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.roundedRect(rightColX - 2, subY - 3.5, 78, 9, 2, 2, 'F');
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.setFontSize(9.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text('AMOUNT RECEIVED:', rightColX + 2, subY + 2.5);
+  doc.text(formatINR(fin.amountPaid), rightValX - 2, subY + 2.5, { align: 'right' });
+
+  subY += 9;
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.text('Net Balance Due:', rightColX, subY);
+  const remBal = fin.remainingBalance;
+  if (remBal > 0) {
+    doc.setTextColor(220, 38, 38);
+    doc.setFont('helvetica', 'bold');
+    doc.text(formatINR(remBal), rightValX, subY, { align: 'right' });
+  } else {
+    doc.setTextColor(16, 185, 129);
+    doc.setFont('helvetica', 'bold');
+    doc.text('₹0 (Paid in Full)', rightValX, subY, { align: 'right' });
+  }
+
+  // Left Side: Dynamic QR Code Verification Box
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.roundedRect(14, summaryBoxY - 2, 98, 48, 3, 3, 'FD');
+
+  const qrPayload = JSON.stringify({
+    gym: gymName,
+    receiptRef: feeRef,
+    roll: rollNumber,
+    name: memberName,
+    plan: fin.planName,
+    paid: fin.amountPaid,
+    balance: fin.remainingBalance,
+    date: payDate,
+    status: fin.status,
+  });
+
+  try {
+    const qrDataUrl = await QRCode.toDataURL(qrPayload, {
+      margin: 1,
+      width: 150,
+      color: { dark: '#0F172A', light: '#FFFFFF' },
+    });
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(18, summaryBoxY + 2, 34, 34, 2, 2, 'F');
+    doc.addImage(qrDataUrl, 'PNG', 19, summaryBoxY + 3, 32, 32);
+  } catch (qrErr) {
+    console.warn('QR Code generation error:', qrErr);
+  }
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text('AUTHENTIC RECEIPT VERIFICATION', 56, summaryBoxY + 8);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.text('Scan this QR code to verify payment validity,', 56, summaryBoxY + 14);
+  doc.text('active subscription term, and access rights', 56, summaryBoxY + 18);
+  doc.text('at MS Fitness biometric turnstiles.', 56, summaryBoxY + 22);
+
+  doc.setFillColor(16, 185, 129);
+  doc.roundedRect(56, summaryBoxY + 28, 50, 6, 1.5, 1.5, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.text('OFFICIAL VERIFIED RECEIPT', 81, summaryBoxY + 32, { align: 'center' });
+
+  // 5. Terms & Notes Container
+  y = 170;
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.roundedRect(14, y, 182, 34, 3, 3, 'FD');
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text('TERMS OF MEMBERSHIP & GYM GUIDELINES:', 18, y + 6);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.8);
+  const termsList = [
+    '1. Fees once paid are non-refundable, non-transferable, and non-extendable under any circumstances.',
+    '2. Members must present their official Member ID / QR Pass at the reception before every workout session.',
+    '3. Clean athletic footwear, gym towels, and appropriate sportswear are strictly mandatory on the workout floor.',
+    '4. MS Fitness reserves the right to suspend admission in the event of misconduct, property damage, or unpaid dues.',
+    '5. In case of medical conditions or physical injuries, members must consult their physician prior to intensive training.',
+  ];
+  termsList.forEach((term, idx) => {
+    doc.text(term, 18, y + 11 + idx * 4.2);
+  });
+
+  // 6. Authorized Signature & Stamp Footer Area
+  y = 212;
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.setLineWidth(0.4);
+  doc.line(14, y, 196, y);
+
+  // Left Bank & Support Details
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text('PAYMENT SUPPORT & HELPLINE', 14, y + 6);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.2);
+  doc.text(`UPI VPA: ${settings.upiId || 'msfitness@upi'} (${settings.upiName || 'MS Fitness'})`, 14, y + 12);
+  doc.text(`Front Desk Helpline: ${gymPhone} | Support: ${gymEmail}`, 14, y + 17);
+  doc.text(`Operating Hours: Mon-Sat 05:00 AM - 10:00 PM | Sun 06:00 AM - 12:00 PM`, 14, y + 22);
+
+  // Right Stamp / Authorized Signatory Box
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.roundedRect(130, y + 3, 66, 26, 2, 2, 'F');
+  doc.setDrawColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(134, y + 5, 58, 14, 1.5, 1.5, 'D');
+
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text(`${gymName} MANAGEMENT`, 163, y + 10, { align: 'center' });
+  doc.setFontSize(6);
+  doc.text('DIGITALLY SIGNED & VERIFIED', 163, y + 15, { align: 'center' });
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.text('AUTHORIZED SIGNATORY', 163, y + 24, { align: 'center' });
+
+  // 7. Bottom Footnote
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(6.5);
+  doc.text(
+    `This is a computer-generated official payment receipt generated by MS Fitness Portal. Document ID: ${feeRef}`,
+    105,
+    285,
+    { align: 'center' }
+  );
+
+  doc.save(`MS_Fitness_Receipt_${feeRef}.pdf`);
 }
 
 /**
- * Generates and downloads a redesigned, ultra-premium AB GYM Official Member ID Card PDF.
- * Designed to look like a luxury high-tech fitness club identity pass with balanced layout,
- * dark + emerald/blue fitness aesthetic, QR verification, dynamic status badges, and watermark.
+ * 2. ADVANCED REGISTRATION / PAYMENT PDF
+ * Redesigned as a comprehensive, branded registration and admission acknowledgement document
+ * containing member profile, plan duration, KYC, financial breakdown, and verification stamp.
+ */
+export async function downloadRegistrationReceiptPDF(reg: RegistrationRequest, settings: GymSettings) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const primaryDark = [15, 23, 42]; // #0F172A
+  const brandEmerald = [16, 185, 129]; // #10B981
+  const brandBlue = [37, 99, 235]; // #2563EB
+  const textMuted = [100, 116, 139]; // #64748B
+  const textDark = [30, 41, 59]; // #1E293B
+  const bgLight = [248, 250, 252]; // #F8FAFC
+  const borderColor = [226, 232, 240]; // #E2E8F0
+
+  const gymName = (settings.gymName || 'MS FITNESS').toUpperCase();
+  const gymTagline = settings.tagline || 'Stronger Body, Stronger You';
+  const gymPhone = settings.phone || '+91 85878 82431';
+  const gymEmail = settings.email || 'support@msfitness.com';
+  const gymAddress = settings.address || 'MS Fitness Complex, New Delhi - 110075';
+
+  const regRef = reg.registrationRef || reg.registrationReferenceNumber || reg.referenceNumber || 'N/A';
+  const rollNumber = reg.rollNumber || 'Unassigned (Pending Admin Approval)';
+  const memberName = (reg.fullName || 'Member').trim();
+  const memberPhone = reg.phone || reg.phoneNumber || 'N/A';
+  const memberEmail = reg.email || reg.emailAddress || 'N/A';
+  const dob = reg.dob || reg.dateOfBirth || 'N/A';
+  const gender = reg.gender || 'Male';
+  const address = reg.address || 'Residential address on record';
+  const emergencyContact = reg.emergencyContact || reg.emergencyContactNumber || 'Available on file';
+  const fitnessGoal = reg.fitnessGoal || 'General Strength & Conditioning';
+  const selectedPlan = reg.selectedPlan || reg.planName || 'Standard Membership';
+  const regFee = parseAmount(reg.registrationFee || settings.registrationFeeDefault || 100);
+  const paymentMethod = reg.paymentMethod || 'UPI';
+  const upiTxnId = reg.upiTxnId || reg.upiTransactionId || reg.transactionId || 'N/A';
+  const regStatus = reg.status || reg.registrationStatus || 'Pending Verification';
+  const regDate = reg.timestamp || reg.createdAt || new Date().toISOString().split('T')[0];
+
+  // Header Banner
+  doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+  doc.rect(0, 0, 210, 46, 'F');
+
+  // Accent Line
+  doc.setFillColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.rect(0, 44.5, 210, 1.5, 'F');
+
+  // Official Logo
+  try {
+    doc.addImage(AB_GYM_LOGO_BASE64, 'JPEG', 14, 7, 30, 30);
+  } catch (err) {
+    console.warn('Could not render logo in Registration PDF:', err);
+  }
+
+  // Header Gym Title
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.text(gymName, 48, 18);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.text(gymTagline, 48, 24);
+
+  doc.setTextColor(203, 213, 225);
+  doc.setFontSize(8);
+  doc.text(`Phone: ${gymPhone}  |  Email: ${gymEmail}`, 48, 30);
+  doc.text(gymAddress, 48, 36);
+
+  // Document Badge on Right
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text('REGISTRATION ACKNOWLEDGEMENT', 196, 18, { align: 'right' });
+
+  doc.setFillColor(30, 41, 59);
+  doc.roundedRect(114, 23, 82, 16, 2, 2, 'F');
+
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`REG REF: ${regRef}`, 192, 29, { align: 'right' });
+
+  doc.setTextColor(203, 213, 225);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(`APPLICATION DATE: ${regDate}`, 192, 35, { align: 'right' });
+
+  // 1. Athlete Personal & Profile Section
+  let y = 52;
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.setLineWidth(0.4);
+  doc.roundedRect(14, y, 182, 54, 3, 3, 'FD');
+
+  doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+  doc.roundedRect(14, y, 182, 8, 3, 3, 'F');
+  doc.rect(14, y + 4, 182, 4, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text('1. ATHLETE PROFILE & PERSONAL INFORMATION', 18, y + 5.5);
+
+  const col1X = 18;
+  const val1X = 52;
+  const col2X = 108;
+  const val2X = 144;
+
+  const row1Y = y + 14;
+  const row2Y = y + 21;
+  const row3Y = y + 28;
+  const row4Y = y + 35;
+  const row5Y = y + 42;
+  const row6Y = y + 48;
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+
+  doc.text('Full Name:', col1X, row1Y);
+  doc.text('Assigned Roll No:', col1X, row2Y);
+  doc.text('Contact Mobile:', col1X, row3Y);
+  doc.text('Date of Birth:', col1X, row4Y);
+  doc.text('Fitness Goal:', col1X, row5Y);
+
+  doc.text('Application Status:', col2X, row1Y);
+  doc.text('Registration Ref:', col2X, row2Y);
+  doc.text('Email Address:', col2X, row3Y);
+  doc.text('Gender:', col2X, row4Y);
+  doc.text('Emergency Contact:', col2X, row5Y);
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.text(memberName, val1X, row1Y);
+  doc.setTextColor(brandBlue[0], brandBlue[1], brandBlue[2]);
+  doc.text(rollNumber, val1X, row2Y);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.text(memberPhone, val1X, row3Y);
+  doc.text(dob, val1X, row4Y);
+  doc.text(fitnessGoal, val1X, row5Y);
+
+  const isApproved = regStatus.toLowerCase().includes('approved');
+  doc.setTextColor(isApproved ? 16 : 217, isApproved ? 185 : 119, isApproved ? 129 : 6);
+  doc.setFont('helvetica', 'bold');
+  doc.text(regStatus, val2X, row1Y);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.text(regRef, val2X, row2Y);
+  doc.text(memberEmail, val2X, row3Y);
+  doc.text(gender, val2X, row4Y);
+  doc.text(emergencyContact, val2X, row5Y);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Address:', col1X, row6Y);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.text(address, val1X, row6Y);
+
+  // 2. Selected Membership Plan & Financial Breakdown
+  y = 112;
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.roundedRect(14, y, 182, 42, 3, 3, 'FD');
+
+  doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+  doc.roundedRect(14, y, 182, 8, 3, 3, 'F');
+  doc.rect(14, y + 4, 182, 4, 'F');
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text('2. ENROLLMENT PLAN & REGISTRATION FEE SUMMARY', 18, y + 5.5);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+
+  doc.text('Selected Plan:', col1X, y + 15);
+  doc.text('Joining Date:', col1X, y + 22);
+  doc.text('Payment Method:', col1X, y + 29);
+  doc.text('Transaction ID:', col1X, y + 36);
+
+  doc.text('Registration Fee:', col2X, y + 15);
+  doc.text('Admission Badge:', col2X, y + 22);
+  doc.text('Payment Verification:', col2X, y + 29);
+  doc.text('Total Reg Fee Paid:', col2X, y + 36);
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.text(selectedPlan, val1X, y + 15);
+  doc.setFont('helvetica', 'normal');
+  doc.text(reg.joiningDate || regDate, val1X, y + 22);
+  doc.text(paymentMethod, val1X, y + 29);
+  doc.text(upiTxnId, val1X, y + 36);
+
+  doc.text(formatINR(regFee), val2X, y + 15);
+  doc.text('Included (RFID / Digital QR Pass)', val2X, y + 22);
+  doc.setTextColor(isApproved ? 16 : 217, isApproved ? 185 : 119, isApproved ? 129 : 6);
+  doc.setFont('helvetica', 'bold');
+  doc.text(isApproved ? 'CONFIRMED / VERIFIED' : 'UNDER VERIFICATION', val2X, y + 29);
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.text(formatINR(regFee), val2X, y + 36);
+
+  // 3. Dynamic QR Verification & Terms Container
+  y = 160;
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.roundedRect(14, y, 182, 50, 3, 3, 'FD');
+
+  const qrPayload = JSON.stringify({
+    gym: gymName,
+    regRef: regRef,
+    roll: rollNumber,
+    name: memberName,
+    plan: selectedPlan,
+    fee: regFee,
+    date: regDate,
+    status: regStatus,
+  });
+
+  try {
+    const qrDataUrl = await QRCode.toDataURL(qrPayload, {
+      margin: 1,
+      width: 150,
+      color: { dark: '#0F172A', light: '#FFFFFF' },
+    });
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(18, y + 5, 36, 36, 2, 2, 'F');
+    doc.addImage(qrDataUrl, 'PNG', 19, y + 6, 34, 34);
+  } catch (qrErr) {
+    console.warn('QR Code generation error:', qrErr);
+  }
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text('MS FITNESS ADMISSION TERMS & GYM RULES:', 60, y + 9);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.8);
+  const rules = [
+    '• This document acknowledges receipt of your membership application and registration fee.',
+    '• Member Roll Number will be finalized upon admin document & fee verification.',
+    '• Registration fee is non-refundable and covers member file setup and identity credentials.',
+    '• Please present this slip along with a valid Government ID at reception for physical onboarding.',
+    '• For queries or assistance, contact front desk support at ' + gymPhone + '.',
+  ];
+  rules.forEach((r, idx) => {
+    doc.text(r, 60, y + 15 + idx * 5.2);
+  });
+
+  // 4. Authorized Signatory & Official Stamp
+  y = 216;
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.line(14, y, 196, y);
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text('MS FITNESS ADMISSION HELPLINE', 14, y + 6);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.2);
+  doc.text(`Helpline: ${gymPhone} | Email: ${gymEmail}`, 14, y + 12);
+  doc.text(`Complex: ${gymAddress}`, 14, y + 17);
+
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.roundedRect(130, y + 2, 66, 26, 2, 2, 'F');
+  doc.setDrawColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(134, y + 4, 58, 14, 1.5, 1.5, 'D');
+
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text(`${gymName} ADMISSIONS`, 163, y + 9, { align: 'center' });
+  doc.setFontSize(6);
+  doc.text('OFFICIALLY REGISTERED & STAMPED', 163, y + 14, { align: 'center' });
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.text('AUTHORIZED REGISTRAR', 163, y + 23, { align: 'center' });
+
+  doc.save(`MS_Fitness_Registration_${regRef}.pdf`);
+}
+
+/**
+ * 3. ADVANCED GYM MEMBER ID CARD PDF
+ * Double-sided luxury fitness identity pass layout with front hero badge,
+ * barcode/QR attendance pass, emergency info, and security pattern.
  */
 export async function downloadMemberCardPDF(member: Member, settings: GymSettings) {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
-    format: 'a4', // Standard A4 layout with optimized proportions
+    format: 'a4',
   });
 
   const primaryDark = [15, 15, 20]; // #0F0F14
@@ -225,6 +711,11 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   const blueColor = [59, 130, 246]; // #3B82F6
   const textMuted = [156, 163, 175]; // #9CA3AF
   const textDark = [229, 231, 235]; // #E5E7EB
+
+  const gymName = (settings.gymName || 'MS FITNESS').toUpperCase();
+  const gymTagline = settings.tagline || 'Stronger Body, Stronger You';
+  const gymPhone = settings.phone || '+91 85878 82431';
+  const gymAddress = settings.address || 'Civil Lines, Near Stadium, New Delhi';
 
   // 1. Page Background (Deep Slate)
   doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
@@ -241,7 +732,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(25, 25, 36);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(54);
-  doc.text('AB GYM FITNESS', 105, 160, { align: 'center', angle: 45 });
+  doc.text(gymName, 105, 160, { align: 'center', angle: 45 });
 
   // Main Card Container (Outer Luxury Frame)
   doc.setFillColor(cardBg[0], cardBg[1], cardBg[2]);
@@ -266,19 +757,19 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
-    doc.text('AB', 32, y + 8, { align: 'center' });
+    doc.text('MS', 32, y + 8, { align: 'center' });
   }
 
   // Header Title & Slogan
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(22);
-  doc.text(settings.gymName || 'AB GYM', 48, y + 3);
+  doc.text(gymName, 48, y + 3);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9.5);
   doc.setTextColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
-  doc.text(settings.tagline || 'Stronger Body, Stronger You', 48, y + 10);
+  doc.text(gymTagline, 48, y + 10);
 
   // Document Badge on Right
   doc.setFillColor(35, 35, 48);
@@ -323,7 +814,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
-  doc.text(nameInitials || 'AB', 43, y + 26, { align: 'center' });
+  doc.text(nameInitials || 'MS', 43, y + 26, { align: 'center' });
   doc.setFontSize(6);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
   doc.text('MEMBER PHOTO', 43, y + 34, { align: 'center' });
@@ -340,13 +831,14 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setLineWidth(0.5);
   doc.roundedRect(66, y + 19, 72, 10, 2, 2, 'FD');
 
+  const rollNumber = member.rollNumber || member.rollNo || 'MS-26-0000';
   doc.setTextColor(96, 165, 250); // Light blue
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
-  doc.text(`ROLL NO: ${member.rollNumber || 'ABG-26-0000'}`, 102, y + 25.5, { align: 'center' });
+  doc.text(`ROLL NO: ${rollNumber}`, 102, y + 25.5, { align: 'center' });
 
   // Status Badge
-  const statusStr = (member.status || 'Active').toUpperCase();
+  const statusStr = (member.status || member.membershipStatus || 'Active').toUpperCase();
   const isActive = statusStr.includes('ACTIVE');
   const isExpired = statusStr.includes('EXPIRED');
   const isDue = statusStr.includes('DUE');
@@ -376,16 +868,14 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setDrawColor(55, 55, 75);
   doc.roundedRect(20, y, 170, 38, 4, 4, 'FD');
 
-  // Section Header
   doc.setFillColor(30, 30, 42);
   doc.roundedRect(20, y, 170, 8, 4, 4, 'F');
-  doc.rect(20, y + 4, 170, 4, 'F'); // flatten bottom corners
+  doc.rect(20, y + 4, 170, 4, 'F');
   doc.setTextColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
-  doc.text('MEMBERSHIP DETAILS', 26, y + 5.5);
+  doc.text('MEMBERSHIP SUBSCRIPTION DETAILS', 26, y + 5.5);
 
-  // 4-Column Grid for Membership Details
   const detailsY = y + 15;
 
   // Plan Name
@@ -396,7 +886,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9.5);
-  doc.text(member.planName || 'Standard Fitness Plan', 26, detailsY + 7);
+  doc.text(member.planName || member.selectedPlan || 'Standard Fitness Plan', 26, detailsY + 7);
 
   // Joining Date
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
@@ -406,9 +896,9 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9.5);
-  doc.text(member.joiningDate || 'N/A', 76, detailsY + 7);
+  doc.text(member.joiningDate || member.joinDate || 'N/A', 76, detailsY + 7);
 
-  // Valid Until (Highlighted in Neon Emerald/Amber)
+  // Valid Until
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7);
@@ -416,7 +906,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10.5);
-  doc.text(member.membershipExpiry || 'Active', 120, detailsY + 7);
+  doc.text(member.membershipExpiry || member.expiryDate || 'Active', 120, detailsY + 7);
 
   // Status Summary
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
@@ -434,7 +924,6 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setDrawColor(55, 55, 75);
   doc.roundedRect(20, y, 170, 44, 4, 4, 'FD');
 
-  // Section Header
   doc.setFillColor(30, 30, 42);
   doc.roundedRect(20, y, 170, 8, 4, 4, 'F');
   doc.rect(20, y + 4, 170, 4, 'F');
@@ -454,7 +943,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  doc.text(member.phone || 'N/A', 26, row1Y + 5.5);
+  doc.text(member.phone || member.phoneNumber || 'N/A', 26, row1Y + 5.5);
 
   // Email Address
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
@@ -464,7 +953,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  doc.text(member.email || 'Registered with Gym', 80, row1Y + 5.5);
+  doc.text(member.email || member.emailAddress || 'Registered with Gym', 80, row1Y + 5.5);
 
   // Gender
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
@@ -484,7 +973,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  doc.text(member.dob || 'On Record', 26, row2Y + 5.5);
+  doc.text(member.dob || member.dateOfBirth || 'On Record', 26, row2Y + 5.5);
 
   // Emergency Contact
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
@@ -494,9 +983,9 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  doc.text(member.emergencyContact || 'Available on Request', 80, row2Y + 5.5);
+  doc.text(member.emergencyContact || member.emergencyContactNumber || 'Available on Request', 80, row2Y + 5.5);
 
-  // Fitness Goal / Medical (if any)
+  // Fitness Goal
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7);
@@ -512,11 +1001,10 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setDrawColor(55, 55, 75);
   doc.roundedRect(20, y, 170, 42, 4, 4, 'FD');
 
-  // Left Verification Notice
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10.5);
-  doc.text('AB GYM OFFICIAL VERIFICATION', 26, y + 10);
+  doc.text(`${gymName} OFFICIAL VERIFICATION`, 26, y + 10);
 
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
   doc.setFont('helvetica', 'normal');
@@ -524,7 +1012,6 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.text('Scan the QR code at gym reception or turnstiles to verify active membership', 26, y + 16);
   doc.text('status, log daily workout attendance, and access fitness locker amenities.', 26, y + 21);
 
-  // Security Pill Badge
   doc.setFillColor(30, 41, 59);
   doc.roundedRect(26, y + 26, 75, 8, 2, 2, 'F');
   doc.setTextColor(96, 165, 250);
@@ -532,14 +1019,13 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setFontSize(6.5);
   doc.text('* VERIFIED AUTHENTIC MEMBER PASS', 63.5, y + 31.5, { align: 'center' });
 
-  // Generate QR Code Data URL dynamically
   const qrDataPayload = JSON.stringify({
-    gym: settings.gymName || 'AB GYM',
-    roll: member.rollNumber,
+    gym: gymName,
+    roll: rollNumber,
     name: member.fullName,
-    plan: member.planName,
+    plan: member.planName || member.selectedPlan,
     status: member.status,
-    expiry: member.membershipExpiry,
+    expiry: member.membershipExpiry || member.expiryDate,
     ref: member.registrationRef || '',
   });
 
@@ -547,24 +1033,14 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
     const qrDataUrl = await QRCode.toDataURL(qrDataPayload, {
       margin: 1,
       width: 200,
-      color: {
-        dark: '#000000',
-        light: '#FFFFFF',
-      },
+      color: { dark: '#000000', light: '#FFFFFF' },
     });
 
-    // White backing box for QR Code
     doc.setFillColor(255, 255, 255);
     doc.roundedRect(148, y + 4, 34, 34, 3, 3, 'F');
     doc.addImage(qrDataUrl, 'PNG', 150, y + 6, 30, 30);
   } catch (qrErr) {
     console.warn('QR Code generation failed, using styled fallback:', qrErr);
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(148, y + 4, 34, 34, 3, 3, 'F');
-    doc.setTextColor(0, 0, 0);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.text('SCAN QR', 165, y + 22, { align: 'center' });
   }
 
   // 7. FOOTER SECTION
@@ -577,7 +1053,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.text(
-    `This card confirms official membership at ${settings.gymName || 'AB GYM'} and is non-transferable. Valid only during the active term.`,
+    `This card confirms official membership at ${gymName} and is non-transferable. Valid only during active subscription.`,
     105,
     y + 6,
     { align: 'center' }
@@ -587,13 +1063,392 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setFontSize(7.5);
   doc.setTextColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
   doc.text(
-    `${settings.address || 'Civil Lines, Moradabad'} | Helpline: ${settings.phone || '+91 98765 43210'}`,
+    `${gymAddress} | Helpline: ${gymPhone}`,
     105,
     y + 11,
     { align: 'center' }
   );
 
-  // Clean filename format
-  const sanitizedRoll = (member.rollNumber || 'ABG-MEMBER').replace(/[^a-zA-Z0-9_-]/g, '-');
-  doc.save(`AB-GYM-Member-ID-${sanitizedRoll}.pdf`);
+  const sanitizedRoll = rollNumber.replace(/[^a-zA-Z0-9_-]/g, '-');
+  doc.save(`MS_Fitness_ID_Card_${sanitizedRoll}.pdf`);
+}
+
+/**
+ * 4. ADVANCED INVOICE / OFFICIAL BILL PDF
+ * Comprehensive tax bill & membership invoice format with itemized charges,
+ * concession breakdowns, payment balances, and bank/UPI settlement details.
+ */
+export async function downloadMemberInvoicePDF(member: Member, settings: GymSettings, payment?: FeePaymentRecord) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const primaryDark = [15, 23, 42]; // #0F172A
+  const brandEmerald = [16, 185, 129]; // #10B981
+  const brandBlue = [37, 99, 235]; // #2563EB
+  const textMuted = [100, 116, 139]; // #64748B
+  const textDark = [30, 41, 59]; // #1E293B
+  const bgLight = [248, 250, 252]; // #F8FAFC
+  const borderColor = [226, 232, 240]; // #E2E8F0
+
+  const gymName = (settings.gymName || 'MS FITNESS').toUpperCase();
+  const gymTagline = settings.tagline || 'Stronger Body, Stronger You';
+  const gymPhone = settings.phone || '+91 85878 82431';
+  const gymEmail = settings.email || 'support@msfitness.com';
+  const gymAddress = settings.address || 'MS Fitness Complex, New Delhi - 110075';
+
+  const rollNumber = member.rollNumber || member.rollNo || 'MS-26-0000';
+  const memberName = (member.fullName || member.name || 'Valued Member').trim();
+  const memberPhone = member.phone || member.phoneNumber || 'N/A';
+  const memberEmail = member.email || member.emailAddress || 'N/A';
+  const memberAddress = member.address || 'Registered with Gym';
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const invoiceNo = `INV-MS-${new Date().getFullYear()}-${rollNumber.replace(/[^a-zA-Z0-9]/g, '')}`;
+  const invoiceDate = payment?.paymentDate || member.lastPaymentDate || todayStr;
+  const dueDate = member.membershipExpiry || member.expiryDate || 'Immediate';
+
+  // Financial calculations
+  const regFee = member.registrationFeePaid || (payment?.registrationRef ? 100 : 0);
+  const planFee = parseAmount(payment?.currentFeeAmount || member.finalFeeAmount || member.regularPlanAmount || 999);
+  const discount = parseAmount(payment?.discountAmount || member.discountAmount || 0);
+  const prevBal = parseAmount(payment?.previousBalance || member.previousBalance || 0);
+  const subtotal = planFee + regFee;
+  const totalPayable = subtotal - discount + prevBal;
+  const amountPaid = parseAmount(payment?.amountPaid || member.lastPaymentAmount || totalPayable);
+  const balanceDue = Math.max(0, totalPayable - amountPaid);
+
+  // Header Banner
+  doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+  doc.rect(0, 0, 210, 46, 'F');
+
+  // Blue accent line
+  doc.setFillColor(brandBlue[0], brandBlue[1], brandBlue[2]);
+  doc.rect(0, 44.5, 210, 1.5, 'F');
+
+  // Official Logo
+  try {
+    doc.addImage(AB_GYM_LOGO_BASE64, 'JPEG', 14, 7, 30, 30);
+  } catch (err) {
+    console.warn('Could not render logo in Invoice PDF:', err);
+  }
+
+  // Header Title
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.text(gymName, 48, 18);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.text(gymTagline, 48, 24);
+
+  doc.setTextColor(203, 213, 225);
+  doc.setFontSize(8);
+  doc.text(`Phone: ${gymPhone}  |  Email: ${gymEmail}`, 48, 30);
+  doc.text(gymAddress, 48, 36);
+
+  // Right Header Invoice Info
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(15);
+  doc.text('MEMBERSHIP INVOICE', 196, 18, { align: 'right' });
+
+  doc.setFillColor(30, 41, 59);
+  doc.roundedRect(114, 23, 82, 16, 2, 2, 'F');
+
+  doc.setTextColor(96, 165, 250);
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`INVOICE #: ${invoiceNo}`, 192, 29, { align: 'right' });
+
+  doc.setTextColor(203, 213, 225);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(`INVOICE DATE: ${invoiceDate}  |  DUE: ${dueDate}`, 192, 35, { align: 'right' });
+
+  // 1. Billed From & Billed To Containers (2 Columns)
+  let y = 52;
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.setLineWidth(0.4);
+  doc.roundedRect(14, y, 88, 38, 3, 3, 'FD');
+  doc.roundedRect(108, y, 88, 38, 3, 3, 'FD');
+
+  // Left: Billed From
+  doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+  doc.roundedRect(14, y, 88, 7, 3, 3, 'F');
+  doc.rect(14, y + 3, 88, 4, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.text('BILLED FROM (GYM OPERATOR)', 18, y + 5);
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text(gymName, 18, y + 13);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.text(gymAddress, 18, y + 18);
+  doc.text(`Phone: ${gymPhone} | Email: ${gymEmail}`, 18, y + 23);
+  doc.text(`UPI VPA: ${settings.upiId || 'msfitness@upi'}`, 18, y + 28);
+  doc.text(`GST / MSME Reg: Registered Fitness Entity`, 18, y + 33);
+
+  // Right: Billed To
+  doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+  doc.roundedRect(108, y, 88, 7, 3, 3, 'F');
+  doc.rect(108, y + 3, 88, 4, 'F');
+  doc.setTextColor(brandBlue[0], brandBlue[1], brandBlue[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.text('BILLED TO (MEMBER / ATHLETE)', 112, y + 5);
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text(memberName, 112, y + 13);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.text(`Member ID / Roll: ${rollNumber}`, 112, y + 18);
+  doc.text(`Mobile: ${memberPhone} | Email: ${memberEmail}`, 112, y + 23);
+  doc.text(`Address: ${memberAddress}`, 112, y + 28);
+  doc.text(`Membership Status: ${(member.status || 'Active').toUpperCase()}`, 112, y + 33);
+
+  // 2. Line Items Table
+  y = 96;
+  doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+  doc.rect(14, y, 182, 8.5, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text('#', 18, y + 5.5);
+  doc.text('ITEM DESCRIPTION', 26, y + 5.5);
+  doc.text('PLAN / DURATION', 110, y + 5.5);
+  doc.text('AMOUNT (INR)', 190, y + 5.5, { align: 'right' });
+
+  // Table Line Items
+  y += 8.5;
+  let itemIndex = 1;
+
+  // Item 1: Registration Fee
+  if (regFee > 0) {
+    doc.setFillColor(255, 255, 255);
+    doc.rect(14, y, 182, 10, 'F');
+    doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+    doc.line(14, y + 10, 196, y + 10);
+
+    doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text(`${itemIndex}`, 18, y + 6);
+    doc.text('Initial Gym Admission & Member ID Issuance', 26, y + 6);
+    doc.text('One-Time Enrollment', 110, y + 6);
+    doc.setFont('helvetica', 'bold');
+    doc.text(formatINR(regFee), 190, y + 6, { align: 'right' });
+    y += 10;
+    itemIndex++;
+  }
+
+  // Item 2: Membership Plan Fee
+  doc.setFillColor(255, 255, 255);
+  doc.rect(14, y, 182, 12, 'F');
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.line(14, y + 12, 196, y + 12);
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(`${itemIndex}`, 18, y + 6);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Fitness Membership Plan — ${member.planName || member.selectedPlan || 'Standard'}`, 26, y + 6);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.text(`Valid Till: ${dueDate} • Access to Gym Floor, Cardio & Strength`, 26, y + 9.5);
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFontSize(8);
+  doc.text(member.planName || 'Monthly Subscription', 110, y + 6);
+  doc.setFont('helvetica', 'bold');
+  doc.text(formatINR(planFee), 190, y + 6, { align: 'right' });
+  y += 12;
+
+  // 3. Invoice Summary Calculations & Settlement Details
+  y += 6;
+  const summaryBoxY = y;
+
+  // Right Side Financial Calculations
+  const rightColX = 120;
+  const rightValX = 190;
+  let subY = y;
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.text('Gross Subtotal:', rightColX, subY);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.text(formatINR(subtotal), rightValX, subY, { align: 'right' });
+
+  if (discount > 0) {
+    subY += 5;
+    doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+    doc.text('Concession / Plan Discount:', rightColX, subY);
+    doc.setTextColor(16, 185, 129);
+    doc.text('- ' + formatINR(discount), rightValX, subY, { align: 'right' });
+  }
+
+  if (prevBal > 0) {
+    subY += 5;
+    doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+    doc.text('Previous Unpaid Balance:', rightColX, subY);
+    doc.setTextColor(217, 119, 6);
+    doc.text('+ ' + formatINR(prevBal), rightValX, subY, { align: 'right' });
+  }
+
+  subY += 5.5;
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.line(rightColX, subY - 1, 196, subY - 1);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.text('Total Invoice Amount:', rightColX, subY + 3);
+  doc.text(formatINR(totalPayable), rightValX, subY + 3, { align: 'right' });
+
+  subY += 8;
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.roundedRect(rightColX - 2, subY - 3.5, 78, 9, 2, 2, 'F');
+  doc.setTextColor(brandEmerald[0], brandEmerald[1], brandEmerald[2]);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.text('AMOUNT PAID / SETTLED:', rightColX + 2, subY + 2.5);
+  doc.text(formatINR(amountPaid), rightValX - 2, subY + 2.5, { align: 'right' });
+
+  subY += 9;
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.text('Net Balance Remaining:', rightColX, subY);
+  if (balanceDue > 0) {
+    doc.setTextColor(220, 38, 38);
+    doc.setFont('helvetica', 'bold');
+    doc.text(formatINR(balanceDue), rightValX, subY, { align: 'right' });
+  } else {
+    doc.setTextColor(16, 185, 129);
+    doc.setFont('helvetica', 'bold');
+    doc.text('₹0 (Full Cleared)', rightValX, subY, { align: 'right' });
+  }
+
+  // Left Side: UPI Payment & Bank Details Box
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.roundedRect(14, summaryBoxY - 2, 98, 48, 3, 3, 'FD');
+
+  const qrPayload = JSON.stringify({
+    gym: gymName,
+    invoiceNo: invoiceNo,
+    roll: rollNumber,
+    name: memberName,
+    amount: totalPayable,
+    balance: balanceDue,
+    dueDate: dueDate,
+  });
+
+  try {
+    const qrDataUrl = await QRCode.toDataURL(qrPayload, {
+      margin: 1,
+      width: 150,
+      color: { dark: '#0F172A', light: '#FFFFFF' },
+    });
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(18, summaryBoxY + 2, 34, 34, 2, 2, 'F');
+    doc.addImage(qrDataUrl, 'PNG', 19, summaryBoxY + 3, 32, 32);
+  } catch (qrErr) {
+    console.warn('QR Code generation error in invoice:', qrErr);
+  }
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text('ONLINE PAYMENT (UPI)', 56, summaryBoxY + 7);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.text(`UPI ID: ${settings.upiId || 'msfitness@upi'}`, 56, summaryBoxY + 13);
+  doc.text(`Beneficiary: ${settings.upiName || 'MS Fitness'}`, 56, summaryBoxY + 18);
+  doc.text(`GPay / PhonePe / Paytm / BHIM`, 56, summaryBoxY + 23);
+
+  doc.setFillColor(37, 99, 235);
+  doc.roundedRect(56, summaryBoxY + 28, 50, 6, 1.5, 1.5, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.text('OFFICIAL TAX INVOICE', 81, summaryBoxY + 32, { align: 'center' });
+
+  // 4. Terms & Policy Container
+  y = 190;
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.roundedRect(14, y, 182, 30, 3, 3, 'FD');
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.8);
+  doc.text('INVOICE TERMS & CONDITIONS:', 18, y + 5.5);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.8);
+  const invoiceTerms = [
+    '1. All subscription fees must be cleared on or before the due date to ensure seamless turnstile admission.',
+    '2. Payments are non-refundable once the membership cycle begins.',
+    '3. For partial fee payments, remaining balance must be settled within 7 days of invoice generation.',
+    '4. In case of any billing discrepancies, please reach out to front desk support within 48 hours.',
+  ];
+  invoiceTerms.forEach((term, idx) => {
+    doc.text(term, 18, y + 10.5 + idx * 4.4);
+  });
+
+  // 5. Authorized Signatory & Official Seal
+  y = 226;
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.line(14, y, 196, y);
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text('MS FITNESS ACCOUNTS & BILLING', 14, y + 6);
+
+  doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.2);
+  doc.text(`Front Desk Helpline: ${gymPhone} | Support: ${gymEmail}`, 14, y + 12);
+  doc.text(`Complex: ${gymAddress}`, 14, y + 17);
+
+  doc.setFillColor(bgLight[0], bgLight[1], bgLight[2]);
+  doc.roundedRect(130, y + 2, 66, 26, 2, 2, 'F');
+  doc.setDrawColor(brandBlue[0], brandBlue[1], brandBlue[2]);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(134, y + 4, 58, 14, 1.5, 1.5, 'D');
+
+  doc.setTextColor(brandBlue[0], brandBlue[1], brandBlue[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text(`${gymName} FINANCE DESK`, 163, y + 9, { align: 'center' });
+  doc.setFontSize(6);
+  doc.text('OFFICIALLY CERTIFIED BILL', 163, y + 14, { align: 'center' });
+
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.text('AUTHORIZED ACCOUNTS OFFICER', 163, y + 23, { align: 'center' });
+
+  doc.save(`MS_Fitness_Invoice_${invoiceNo}.pdf`);
 }
