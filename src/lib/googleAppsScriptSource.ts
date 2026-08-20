@@ -3403,41 +3403,131 @@ function sendConfirmationEmail(type, email, details) {
         '</div>' +
         '</div></body></html>';
 
-      // 1. Generate Member ID Card PDF
+      // 1. Generate Member ID Card PDF (CR80 Wallet Size 85.6mm x 54mm 2-sided)
+      var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=1&color=0A0D14&data=' + encodeURIComponent(JSON.stringify({
+        gym: gymName,
+        id: rollNum,
+        member: memberName,
+        plan: plan,
+        status: 'ACTIVE',
+        validUntil: expDate
+      }));
+
+      var memberInitials = (memberName || 'AB')
+        .split(' ')
+        .filter(function(w) { return Boolean(w); })
+        .slice(0, 2)
+        .map(function(w) { return w[0].toUpperCase(); })
+        .join('') || 'AB';
+
       var cardHtmlForPdf = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
         '<style>' +
-        'body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; padding: 20px; background: #ffffff; color: #1e293b; }' +
-        '.card-box { width: 340px; margin: 0 auto; background: #09090b; color: #ffffff; border-radius: 12px; overflow: hidden; border: 2px solid #27272a; box-shadow: 0 8px 20px rgba(0,0,0,0.3); }' +
-        '.c-head { background: linear-gradient(135deg, #18181b 0%, #09090b 100%); padding: 16px; text-align: center; border-bottom: 2px solid #10b981; }' +
-        '.c-head h2 { margin: 0; font-size: 18px; font-weight: 900; letter-spacing: 1px; color: #ffffff; }' +
-        '.c-head p { margin: 2px 0 0; font-size: 10px; color: #10b981; font-weight: 700; text-transform: uppercase; }' +
-        '.c-body { padding: 16px; font-size: 12px; }' +
-        '.c-badge { background: rgba(16,185,129,0.2); border: 1px solid #10b981; color: #10b981; font-weight: 800; font-family: monospace; font-size: 16px; padding: 6px; border-radius: 6px; text-align: center; margin-bottom: 12px; }' +
-        '.c-row { display: flex; justify-content: space-between; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px; }' +
-        '.c-lbl { color: #94a3b8; font-weight: 500; font-size: 11px; }' +
-        '.c-val { color: #f8fafc; font-weight: 700; font-size: 11px; text-align: right; }' +
-        '.c-foot { background: #18181b; padding: 10px; text-align: center; font-size: 9px; color: #94a3b8; border-top: 1px solid #27272a; }' +
+        '@page { size: 85.6mm 54.0mm; margin: 0; }' +
+        '@media print { html, body { width: 85.6mm; height: 54.0mm; } .card-page { page-break-after: always; } .card-page:last-child { page-break-after: avoid; } }' +
+        '* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }' +
+        'body { font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Arial, sans-serif; margin: 0; padding: 0; background: #0a0d14; color: #ffffff; width: 85.6mm; height: 54.0mm; overflow: hidden; }' +
+        '.card-page { width: 85.6mm; height: 54.0mm; position: relative; background: #0a0d14; padding: 2.5mm; overflow: hidden; page-break-inside: avoid; page-break-after: always; }' +
+        '.card-border { width: 100%; height: 100%; border: 0.4mm solid #262e40; border-radius: 2mm; position: relative; padding: 2mm; background: #0a0d14; }' +
+        '.top-stripe { position: absolute; top: 0; left: 0; right: 0; height: 1.5mm; background: #10b981; border-top-left-radius: 1.6mm; border-top-right-radius: 1.6mm; }' +
+        '.c-header { display: table; width: 100%; margin-top: 0.5mm; padding-bottom: 1.2mm; border-bottom: 0.3mm solid #262e40; }' +
+        '.c-logo { display: table-cell; vertical-align: middle; width: 8mm; }' +
+        '.logo-box { width: 7mm; height: 7mm; background: #10b981; border-radius: 1mm; color: #ffffff; font-weight: 900; font-size: 8px; line-height: 7mm; text-align: center; }' +
+        '.c-titles { display: table-cell; vertical-align: middle; padding-left: 2mm; }' +
+        '.gym-title { font-size: 8.5px; font-weight: 900; letter-spacing: 0.5px; color: #ffffff; margin: 0; line-height: 1; }' +
+        '.gym-tag { font-size: 4.5px; font-weight: 700; color: #10b981; letter-spacing: 0.3px; margin: 1px 0 0 0; text-transform: uppercase; }' +
+        '.c-badge { display: table-cell; vertical-align: middle; text-align: right; }' +
+        '.pass-badge { display: inline-block; background: #121620; border: 0.3mm solid #262e40; color: #e2e8f0; font-size: 4.5px; font-weight: 800; padding: 1mm 2mm; border-radius: 1mm; letter-spacing: 0.3px; }' +
+        '.c-main { display: table; width: 100%; margin-top: 1.5mm; }' +
+        '.c-photo-col { display: table-cell; vertical-align: top; width: 18mm; text-align: center; }' +
+        '.photo-frame { width: 17mm; height: 21mm; background: #121620; border: 0.4mm solid #10b981; border-radius: 1.5mm; margin: 0 auto; text-align: center; padding-top: 3.5mm; }' +
+        '.photo-initials { font-size: 11px; font-weight: 900; color: #10b981; letter-spacing: 0.5px; }' +
+        '.photo-label { font-size: 4px; color: #94a3b8; margin-top: 3mm; letter-spacing: 0.3px; font-weight: 600; }' +
+        '.active-pill { background: #10b981; color: #000000; font-size: 5px; font-weight: 900; padding: 0.8mm 0; border-radius: 0.8mm; margin-top: 1.2mm; width: 17mm; text-align: center; letter-spacing: 0.4px; }' +
+        '.c-details-col { display: table-cell; vertical-align: top; padding-left: 2.5mm; width: 38mm; }' +
+        '.m-name { font-size: 8px; font-weight: 900; color: #ffffff; text-transform: uppercase; margin: 0 0 1mm 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38mm; }' +
+        '.id-pill { background: #0f1e3c; border: 0.3mm solid #3b82f6; color: #93c5fd; font-size: 5.5px; font-weight: 800; padding: 0.8mm 1.5mm; border-radius: 1mm; display: inline-block; margin-bottom: 1.2mm; font-family: monospace; }' +
+        '.info-row { font-size: 5px; margin-bottom: 0.8mm; color: #cbd5e1; line-height: 1.2; }' +
+        '.info-lbl { color: #94a3b8; font-weight: 700; display: inline-block; width: 14mm; font-size: 4.8px; }' +
+        '.info-val { color: #ffffff; font-weight: 700; font-size: 5px; }' +
+        '.info-val.highlight { color: #10b981; font-weight: 800; }' +
+        '.c-qr-col { display: table-cell; vertical-align: top; width: 19mm; text-align: right; }' +
+        '.qr-box { width: 18mm; background: #ffffff; border-radius: 1.2mm; padding: 1mm; text-align: center; margin-left: auto; }' +
+        '.qr-img { width: 16mm; height: 16mm; display: block; margin: 0 auto; }' +
+        '.qr-label { color: #0a0d14; font-size: 4.2px; font-weight: 900; margin-top: 0.5mm; text-align: center; letter-spacing: 0.2px; }' +
+        '.c-foot { position: absolute; bottom: 1.5mm; left: 2mm; right: 2mm; border-top: 0.3mm solid #262e40; padding-top: 1mm; display: table; width: calc(100% - 4mm); }' +
+        '.c-foot-left { display: table-cell; font-size: 4.2px; color: #94a3b8; text-align: left; }' +
+        '.c-foot-right { display: table-cell; font-size: 4.5px; font-weight: 800; color: #10b981; text-align: right; }' +
+        /* BACK OF CARD */
+        '.back-top-stripe { position: absolute; top: 0; left: 0; right: 0; height: 1.5mm; background: #3b82f6; border-top-left-radius: 1.6mm; border-top-right-radius: 1.6mm; }' +
+        '.back-instr { background: #121620; border: 0.3mm solid #262e40; border-radius: 1mm; padding: 1mm 1.5mm; margin-bottom: 1.2mm; font-size: 4.2px; color: #e2e8f0; }' +
+        '.back-instr-title { color: #93c5fd; font-weight: 800; font-size: 4.5px; margin-bottom: 0.5mm; }' +
+        '.rules-list { font-size: 4px; color: #94a3b8; line-height: 1.35; margin: 0; padding-left: 0; list-style: none; }' +
+        '.rules-list li { margin-bottom: 0.5mm; }' +
+        '.rules-list strong { color: #10b981; }' +
+        '.contact-text { font-size: 4.2px; color: #cbd5e1; margin-top: 1mm; line-height: 1.3; }' +
+        '.property-note { font-size: 4px; color: #94a3b8; text-align: center; margin-top: 0.8mm; }' +
         '</style></head><body>' +
-        '<div class="card-box">' +
-        '<div class="c-head"><h2>' + gymName.toUpperCase() + '</h2><p>' + gymTagline + '</p></div>' +
-        '<div class="c-body">' +
-        '<div class="c-badge">' + rollNum + '</div>' +
-        '<table style="width:100%; font-size:11px; border-collapse:collapse;">' +
-        '<tr><td style="color:#94a3b8; padding:3px 0;">Member:</td><td style="color:#ffffff; font-weight:bold; text-align:right;">' + memberName + '</td></tr>' +
-        '<tr><td style="color:#94a3b8; padding:3px 0;">Phone:</td><td style="color:#ffffff; font-weight:bold; text-align:right;">' + (details.phone || 'N/A') + '</td></tr>' +
-        '<tr><td style="color:#94a3b8; padding:3px 0;">Plan:</td><td style="color:#ffffff; font-weight:bold; text-align:right;">' + plan + '</td></tr>' +
-        '<tr><td style="color:#94a3b8; padding:3px 0;">Valid From:</td><td style="color:#ffffff; font-weight:bold; text-align:right;">' + joinDate + '</td></tr>' +
-        '<tr><td style="color:#94a3b8; padding:3px 0;">Valid Upto:</td><td style="color:#10b981; font-weight:bold; text-align:right;">' + expDate + '</td></tr>' +
-        '<tr><td style="color:#94a3b8; padding:3px 0;">Status:</td><td style="color:#10b981; font-weight:bold; text-align:right;">ACTIVE</td></tr>' +
-        '</table>' +
+        // PAGE 1: FRONT SIDE
+        '<div class="card-page"><div class="card-border">' +
+        '<div class="top-stripe"></div>' +
+        '<div class="c-header">' +
+        '<div class="c-logo"><div class="logo-box">AB</div></div>' +
+        '<div class="c-titles"><div class="gym-title">' + gymName.toUpperCase() + '</div><div class="gym-tag">' + gymTagline + '</div></div>' +
+        '<div class="c-badge"><div class="pass-badge">MEMBERSHIP CARD</div></div>' +
         '</div>' +
-        '<div class="c-foot">Official MS Fitness Membership Access Pass<br>' + gymAddress + ' • ' + gymPhone + '</div>' +
-        '</div></body></html>';
+        '<div class="c-main">' +
+        '<div class="c-photo-col">' +
+        '<div class="photo-frame"><div class="photo-initials">' + memberInitials + '</div><div class="photo-label">MEMBER PHOTO</div></div>' +
+        '<div class="active-pill">★ ACTIVE</div>' +
+        '</div>' +
+        '<div class="c-details-col">' +
+        '<div class="m-name">' + memberName + '</div>' +
+        '<div class="id-pill">ROLL NO / ID: ' + rollNum + '</div>' +
+        '<div class="info-row"><span class="info-lbl">PLAN:</span><span class="info-val">' + plan + '</span></div>' +
+        '<div class="info-row"><span class="info-lbl">VALID FROM:</span><span class="info-val">' + joinDate + '</span></div>' +
+        '<div class="info-row"><span class="info-lbl">VALID UNTIL:</span><span class="info-val highlight">' + expDate + '</span></div>' +
+        '</div>' +
+        '<div class="c-qr-col">' +
+        '<div class="qr-box"><img src="' + qrUrl + '" class="qr-img" /><div class="qr-label">SCAN VERIFY</div></div>' +
+        '</div>' +
+        '</div>' +
+        '<div class="c-foot">' +
+        '<div class="c-foot-left">' + gymName + ' • Official Access Pass</div>' +
+        '<div class="c-foot-right">Valid for Gym Entry</div>' +
+        '</div>' +
+        '</div></div>' +
+        // PAGE 2: BACK SIDE
+        '<div class="card-page" style="page-break-after:avoid;"><div class="card-border">' +
+        '<div class="back-top-stripe"></div>' +
+        '<div class="c-header">' +
+        '<div class="c-titles" style="padding-left:0;"><div class="gym-title">' + gymName.toUpperCase() + '</div></div>' +
+        '<div class="c-badge"><div class="pass-badge" style="color:#93c5fd; border-color:#3b82f6;">MEMBERSHIP INFORMATION</div></div>' +
+        '</div>' +
+        '<div class="c-main" style="margin-top:1.2mm;">' +
+        '<div style="display:table-cell; vertical-align:top; width:54mm;">' +
+        '<div class="back-instr"><div class="back-instr-title">VERIFICATION & ACCESS INSTRUCTIONS:</div>Present this card at turnstiles / reception for locker & gym access.</div>' +
+        '<div style="font-size:4.5px; font-weight:800; color:#10b981; margin-bottom:0.6mm;">IMPORTANT RULES:</div>' +
+        '<ul class="rules-list">' +
+        '<li>• Clean sports shoes & gym towel required on workout floor.</li>' +
+        '<li>• Re-rack weights after use and sanitize equipment.</li>' +
+        '<li>• Card is non-transferable and must be shown on request.</li>' +
+        '</ul>' +
+        '<div class="contact-text">' + gymAddress + '<br>Helpline: ' + gymPhone + ' | ' + gymEmail + '</div>' +
+        '</div>' +
+        '<div class="c-qr-col" style="width:22mm;">' +
+        '<div class="qr-box" style="width:20mm;"><img src="' + qrUrl + '" class="qr-img" style="width:18mm; height:18mm;" /><div class="qr-label" style="color:#2563eb;">AUTHENTIC PASS</div></div>' +
+        '</div>' +
+        '</div>' +
+        '<div class="c-foot">' +
+        '<div class="c-foot-left" style="width:100%; text-align:center;">This card is the property of ' + gymName + '. If found, please return to front desk reception.</div>' +
+        '</div>' +
+        '</div></div>' +
+        '</body></html>';
 
       try {
-        var cardBlob = Utilities.newBlob(cardHtmlForPdf, 'text/html', 'MSFITNESS_MemberCard_' + rollNum + '.html')
+        var cardBlob = Utilities.newBlob(cardHtmlForPdf, 'text/html', 'AB-GYM-MEMBER-ID-' + rollNum + '.html')
           .getAs('application/pdf')
-          .setName('MSFITNESS_MemberCard_' + rollNum + '.pdf');
+          .setName('AB-GYM-MEMBER-ID-' + rollNum + '.pdf');
         attachments.push(cardBlob);
       } catch (pdfErr) {
         Logger.log('Member Card PDF warning: ' + pdfErr.toString());

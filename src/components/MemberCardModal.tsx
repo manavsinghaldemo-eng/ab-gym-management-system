@@ -168,7 +168,7 @@ export const MemberCardModal: React.FC<MemberCardModalProps> = ({ member, onClos
                   </div>
 
                   <div className="px-2.5 py-1 rounded-full bg-zinc-800/80 border border-zinc-700 text-[9px] sm:text-[10px] font-bold text-zinc-300 font-mono tracking-wider">
-                    OFFICIAL MEMBER ID CARD
+                    MEMBERSHIP CARD
                   </div>
                 </div>
 
@@ -248,7 +248,7 @@ export const MemberCardModal: React.FC<MemberCardModalProps> = ({ member, onClos
                     {gymName}
                   </h4>
                   <span className="text-[9px] sm:text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">
-                    MEMBERSHIP CARD
+                    MEMBERSHIP INFORMATION
                   </span>
                 </div>
 

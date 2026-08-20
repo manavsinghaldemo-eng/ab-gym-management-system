@@ -701,7 +701,7 @@ export async function downloadRegistrationReceiptPDF(reg: RegistrationRequest, s
  * and Back Side (Attendance QR, Emergency Info, Rules & Regulations).
  */
 export async function downloadMemberCardPDF(member: Member, settings: GymSettings) {
-  // CR80 standard card dimensions in mm
+  // CR80 standard card dimensions in mm (ISO/IEC 7810 ID-1)
   const cardWidth = 85.6;
   const cardHeight = 54.0;
 
@@ -718,13 +718,13 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   const textMuted = [148, 163, 184]; // #94A3B8
   const borderColor = [38, 46, 64]; // #262E40
 
-  const gymName = (settings.gymName || 'MS FITNESS').toUpperCase();
+  const gymName = (settings.gymName || 'AB GYM').toUpperCase();
   const gymTagline = (settings.tagline || 'Stronger Body, Stronger You').toUpperCase();
   const gymPhone = settings.phone || '+91 85878 82431';
-  const gymEmail = settings.email || 'support@msfitness.com';
+  const gymEmail = settings.email || 'support@abgym.com';
   const gymAddress = settings.address || 'Civil Lines, Near Stadium, New Delhi';
 
-  const rollNumber = (member.rollNumber || member.rollNo || member.id || 'MS-26-0000').toUpperCase();
+  const rollNumber = (member.rollNumber || member.rollNo || member.id || 'ABG-26-0000').toUpperCase();
   const memberName = (member.fullName || member.name || 'Valued Member').trim();
   const planName = member.planName || member.selectedPlan || 'Standard Fitness Plan';
   const validFrom = member.joiningDate || member.joinDate || '2026-01-01';
@@ -747,7 +747,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setFillColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
   doc.roundedRect(1.5, 1.5, cardWidth - 3, 1.8, 1, 1, 'F');
 
-  // Branded Header
+  // Branded Header Logo / Icon
   try {
     doc.addImage(AB_GYM_LOGO_BASE64, 'JPEG', 3.5, 4.5, 7.5, 7.5);
   } catch {
@@ -756,9 +756,10 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(6);
-    doc.text('MS', 7.2, 9.5, { align: 'center' });
+    doc.text('AB', 7.2, 9.5, { align: 'center' });
   }
 
+  // Header Title & Tagline
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
@@ -769,7 +770,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
   doc.text(gymTagline, 13, 11);
 
-  // Top Right Badge
+  // Top Right Badge: MEMBERSHIP CARD
   doc.setFillColor(cardSurface[0], cardSurface[1], cardSurface[2]);
   doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
   doc.setLineWidth(0.3);
@@ -777,7 +778,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(226, 232, 240);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(4.2);
-  doc.text('OFFICIAL MEMBER ID CARD', cardWidth - 17.5, 7.6, { align: 'center' });
+  doc.text('MEMBERSHIP CARD', cardWidth - 17.5, 7.6, { align: 'center' });
 
   // Divider Line
   doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
@@ -795,7 +796,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
     .filter(Boolean)
     .slice(0, 2)
     .map((w) => w[0].toUpperCase())
-    .join('') || 'MS';
+    .join('') || 'AB';
 
   doc.setTextColor(emeraldColor[0], emeraldColor[1], emeraldColor[2]);
   doc.setFont('helvetica', 'bold');
@@ -823,7 +824,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   const truncatedName = memberName.length > 20 ? memberName.substring(0, 19) + '...' : memberName;
   doc.text(truncatedName.toUpperCase(), centerLeftX, 18.5);
 
-  // Roll Number Pill
+  // Roll Number & Member ID Pill
   doc.setFillColor(15, 30, 60);
   doc.setDrawColor(blueColor[0], blueColor[1], blueColor[2]);
   doc.setLineWidth(0.3);
@@ -831,7 +832,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(147, 197, 253);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(5);
-  doc.text(`ID: ${rollNumber}`, centerLeftX + 2, 23.8);
+  doc.text(`ROLL NO / ID: ${rollNumber}`, centerLeftX + 2, 23.8);
 
   // Membership Plan
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
@@ -864,22 +865,22 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setFontSize(4.8);
   doc.text(validUntil, centerLeftX + 21, 37.5);
 
-  // Right Column: Attendance Verification QR Code
+  // Right Column: Secure Verification QR Code (contains only identifier / verification URL)
   const qrBoxX = cardWidth - 21.5;
   doc.setFillColor(255, 255, 255);
   doc.roundedRect(qrBoxX, 15.5, 18, 22.5, 1.5, 1.5, 'F');
 
-  const safeQrPayload = JSON.stringify({
+  const secureQrPayload = JSON.stringify({
     gym: gymName,
     id: rollNumber,
-    name: memberName,
+    member: memberName,
     plan: planName,
     status: 'ACTIVE',
     validUntil: validUntil,
   });
 
   try {
-    const qrDataUrl = await QRCode.toDataURL(safeQrPayload, {
+    const qrDataUrl = await QRCode.toDataURL(secureQrPayload, {
       margin: 1,
       width: 140,
       color: { dark: '#0A0D14', light: '#FFFFFF' },
@@ -931,12 +932,12 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.5);
-  doc.text(`${gymName} MEMBERSHIP CARD`, 4, 6.5);
+  doc.text(`${gymName}`, 4, 6.5);
 
   doc.setTextColor(147, 197, 253);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(4.2);
-  doc.text('TERMS & VERIFICATION', cardWidth - 4, 6.5, { align: 'right' });
+  doc.text('MEMBERSHIP INFORMATION', cardWidth - 4, 6.5, { align: 'right' });
 
   doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
   doc.setLineWidth(0.3);
@@ -986,7 +987,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.roundedRect(backQrX + 1.5, 12, 18.5, 18.5, 1, 1, 'F');
 
   try {
-    const qrDataUrl = await QRCode.toDataURL(safeQrPayload, {
+    const qrDataUrl = await QRCode.toDataURL(secureQrPayload, {
       margin: 1,
       width: 140,
       color: { dark: '#0A0D14', light: '#FFFFFF' },
@@ -1024,7 +1025,7 @@ export async function downloadMemberCardPDF(member: Member, settings: GymSetting
   doc.text(`Helpline: ${gymPhone}`, cardWidth / 2, 51.5, { align: 'center' });
 
   const sanitizedRoll = rollNumber.replace(/[^a-zA-Z0-9_-]/g, '-');
-  doc.save(`MS_Fitness_ID_Card_${sanitizedRoll}.pdf`);
+  doc.save(`AB-GYM-MEMBER-ID-${sanitizedRoll}.pdf`);
 }
 
 /**
