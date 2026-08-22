@@ -297,7 +297,7 @@ async function fallbackAppsScriptBackend<T>(
     return {
       success: true,
       message: 'Admin accounts fetched successfully.',
-      data: { records: users } as any,
+      data: users as any,
       records: users as any,
     };
   }
@@ -2287,9 +2287,33 @@ export const apiService = {
   // Admin User Management
   getAdminUsers: async (token?: string) => {
     try {
-      const res = await callAdminApi<AdminUser[]>('getAdminUsers', {}, token);
-      if (res && res.success && res.data && Array.isArray(res.data)) {
-        return res;
+      const res = await callAdminApi<any>('getAdminUsers', {}, token);
+      if (res && res.success) {
+        let list: AdminUser[] = [];
+        if (Array.isArray(res.data)) {
+          list = res.data;
+        } else if (res.data && Array.isArray((res.data as any).records)) {
+          list = (res.data as any).records;
+        } else if (Array.isArray(res.records)) {
+          list = res.records;
+        }
+
+        if (list.length > 0) {
+          const localAdmins = getStoredAdminUsers();
+          const remoteEmails = new Set(list.map((u: AdminUser) => (u.email || '').trim().toLowerCase()));
+          const combined = [...list];
+          localAdmins.forEach(loc => {
+            if (!remoteEmails.has((loc.email || '').trim().toLowerCase())) {
+              combined.push(loc);
+            }
+          });
+          return {
+            success: true,
+            message: 'Admin accounts fetched successfully.',
+            data: combined,
+            records: combined,
+          };
+        }
       }
     } catch (e) {
       console.warn('Remote getAdminUsers failed, using local storage:', e);

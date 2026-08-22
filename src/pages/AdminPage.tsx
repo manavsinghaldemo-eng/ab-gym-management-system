@@ -1674,6 +1674,21 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     }
   }, [currentPath, onNavigate, handleSessionExpired]);
 
+  // Helper to safely get current admin display name
+  const getLoggedInAdminName = useCallback((): string => {
+    try {
+      const raw = localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || localStorage.getItem('abFitnessAdminEmail');
+      if (!raw) return 'Super Admin';
+      if (raw.startsWith('{')) {
+        const parsed = JSON.parse(raw);
+        return parsed.name || parsed.fullName || parsed.email || 'Super Admin';
+      }
+      return raw;
+    } catch {
+      return 'Super Admin';
+    }
+  }, []);
+
   // Admin Login Handler
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -1690,52 +1705,38 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     setLoginError("");
 
     try {
-      const response = await fetch(
-        GOOGLE_APPS_SCRIPT_URL,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "text/plain;charset=utf-8"
-          },
-          body: JSON.stringify({
-            action: "adminLogin",
-            email: cleanEmail,
-            password: cleanPassword
-          })
-        }
-      );
+      const result = await apiService.adminLogin({
+        email: cleanEmail,
+        password: cleanPassword
+      });
 
-      const result = await response.json();
-      console.log("AB GYM BACKEND:", result);
+      console.log("AB GYM ADMIN LOGIN RESULT:", result);
 
       if (!result.success) {
         throw new Error(
-          result.message || "Admin login failed."
+          result.message || "Invalid Admin Security Code / Password."
         );
       }
 
-      localStorage.setItem(
-        "abFitnessAdminToken",
-        result.token
-      );
-
-      localStorage.setItem(
-        "abFitnessAdminEmail",
-        cleanEmail
-      );
-
-      const token = result.token || `token-${Date.now()}`;
+      const token = result.token || (result.data as any)?.token || `ABG-ADM-${Date.now()}`;
+      localStorage.setItem("abFitnessAdminToken", token);
+      localStorage.setItem("abFitnessAdminEmail", cleanEmail);
       localStorage.setItem(ADMIN_STORAGE_KEYS.TOKEN, token);
       sessionStorage.setItem('abGymAdminToken', token);
       sessionStorage.setItem('abgym_admin_token', token);
       setAdminToken(token);
 
-      const adminUser = result.data?.admin || result.admin || { email: cleanEmail };
+      const adminUser = result.admin || (result.data as any)?.admin || {
+        name: result.adminName || cleanEmail.split('@')[0],
+        fullName: result.adminName || cleanEmail.split('@')[0],
+        email: cleanEmail,
+        role: (result.data as any)?.role || 'Admin'
+      };
       const userStr = typeof adminUser === 'string' ? adminUser : JSON.stringify(adminUser);
       localStorage.setItem(ADMIN_STORAGE_KEYS.USER, userStr);
       sessionStorage.setItem('abGymAdminUser', userStr);
 
-      const expiresAt = result.data?.expiresAt || result.expiresAt || (Date.now() + 12 * 60 * 60 * 1000);
+      const expiresAt = result.expiresAt || (result.data as any)?.expiresAt || (Date.now() + 12 * 60 * 60 * 1000);
       localStorage.setItem(ADMIN_STORAGE_KEYS.EXPIRY, expiresAt.toString());
       sessionStorage.setItem(ADMIN_STORAGE_KEYS.EXPIRY, expiresAt.toString());
 
@@ -1748,7 +1749,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
       setLoginError(
         error instanceof Error
           ? error.message
-          : "Admin login failed."
+          : "Admin login failed. Please verify credentials."
       );
     } finally {
       setIsLoggingIn(false);
@@ -2959,7 +2960,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     const refKey = feeRef || rollNo || regRef;
     setProcessingId(`resend-receipt-${refKey}`);
     try {
-      const currentAdminName = localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Admin';
+      const currentAdminName = getLoggedInAdminName();
       const payload = {
         feeReferenceNumber: feeRef,
         fee_ref_no: feeRef,
@@ -3185,7 +3186,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     setBatchReminderMode(mode);
 
     try {
-      const currentAdminName = localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Admin';
+      const currentAdminName = getLoggedInAdminName();
       const res = await apiService.sendPaymentReminders({
         mode,
         upcomingDays: 7,
@@ -3241,7 +3242,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     setProcessingId(procKey);
 
     try {
-      const currentAdminName = localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Admin';
+      const currentAdminName = getLoggedInAdminName();
       const res = await apiService.sendSingleReminder(item.rollNumber, {
         adminName: currentAdminName,
       }, token);
@@ -3294,7 +3295,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
     setCronConfig(prev => ({ ...prev, isSaving: true }));
     try {
-      const currentAdminName = localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Admin';
+      const currentAdminName = getLoggedInAdminName();
       const res = await apiService.configureReminderCron({
         enable,
         hour: cronConfig.hour,
@@ -3327,7 +3328,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
     setCronConfig(prev => ({ ...prev, hour: newHour, isSaving: true }));
     try {
-      const currentAdminName = localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Admin';
+      const currentAdminName = getLoggedInAdminName();
       const res = await apiService.configureReminderCron({
         enable: cronConfig.enabled,
         hour: newHour,
@@ -3912,6 +3913,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               { id: 'reminders', label: 'Payment Reminders', icon: BellRing, count: dueMembersAnalysis.all.length, countColor: 'bg-rose-500/20 text-rose-300 border-rose-500/40', path: '/admin/reminders' },
               { id: 'attendance', label: 'QR Attendance', icon: QrCode, count: attendanceRecords.filter(a => a.date === new Date().toISOString().split('T')[0]).length, countColor: 'bg-blue-500/20 text-blue-400 border-blue-500/40', path: '/admin/attendance' },
               { id: 'admins', label: 'Admins', icon: ShieldCheck, count: adminUsers.length, countColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40', path: '/admin/admins' },
+              { id: 'settings', label: 'Settings', icon: SettingsIcon, path: '/admin/settings' },
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -6579,7 +6581,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           >
             <AdminManagement
-              currentAdminName={localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Super Admin'}
+              currentAdminName={getLoggedInAdminName()}
               adminToken={getSavedAdminToken()}
               onActivityLogged={loadLiveData}
             />
