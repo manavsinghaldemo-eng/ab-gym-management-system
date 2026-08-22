@@ -34,11 +34,11 @@ export async function downloadFeeReceiptPDF(record: FeePaymentRecord, settings: 
   const bgLight = [248, 250, 252]; // #F8FAFC
   const borderColor = [226, 232, 240]; // #E2E8F0
 
-  const gymName = (settings.gymName || 'MS FITNESS').toUpperCase();
+  const gymName = (settings.gymName || 'AB GYM').toUpperCase();
   const gymTagline = settings.tagline || 'Stronger Body, Stronger You';
   const gymPhone = settings.phone || '+91 85878 82431';
-  const gymEmail = settings.email || 'support@msfitness.com';
-  const gymAddress = settings.address || 'MS Fitness Complex, New Delhi - 110075';
+  const gymEmail = settings.email || 'support@abgym.com';
+  const gymAddress = settings.address || 'Civil Lines, Near Stadium, New Delhi';
   const feeRef = record.feeReferenceNumber || record.id || 'N/A';
   const rollNumber = record.rollNumber || 'Unassigned (Pending Verification)';
   const regRef = record.registrationReferenceNumber || record.registrationRef || 'N/A';
@@ -421,11 +421,11 @@ export async function downloadRegistrationReceiptPDF(reg: RegistrationRequest, s
   const bgLight = [248, 250, 252]; // #F8FAFC
   const borderColor = [226, 232, 240]; // #E2E8F0
 
-  const gymName = (settings.gymName || 'MS FITNESS').toUpperCase();
+  const gymName = (settings.gymName || 'AB GYM').toUpperCase();
   const gymTagline = settings.tagline || 'Stronger Body, Stronger You';
   const gymPhone = settings.phone || '+91 85878 82431';
-  const gymEmail = settings.email || 'support@msfitness.com';
-  const gymAddress = settings.address || 'MS Fitness Complex, New Delhi - 110075';
+  const gymEmail = settings.email || 'support@abgym.com';
+  const gymAddress = settings.address || 'Civil Lines, Near Stadium, New Delhi';
 
   const regRef = reg.registrationRef || reg.registrationReferenceNumber || reg.referenceNumber || 'N/A';
   const rollNumber = reg.rollNumber || 'Unassigned (Pending Admin Approval)';
@@ -642,7 +642,7 @@ export async function downloadRegistrationReceiptPDF(reg: RegistrationRequest, s
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
-  doc.text('MS FITNESS ADMISSION TERMS & GYM RULES:', 60, y + 9);
+  doc.text(`${gymName} ADMISSION TERMS & GYM RULES:`, 60, y + 9);
 
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
   doc.setFont('helvetica', 'normal');
@@ -666,7 +666,7 @@ export async function downloadRegistrationReceiptPDF(reg: RegistrationRequest, s
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.text('MS FITNESS ADMISSION HELPLINE', 14, y + 6);
+  doc.text(`${gymName} ADMISSION HELPLINE`, 14, y + 6);
 
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
   doc.setFont('helvetica', 'normal');
@@ -1048,20 +1048,20 @@ export async function downloadMemberInvoicePDF(member: Member, settings: GymSett
   const bgLight = [248, 250, 252]; // #F8FAFC
   const borderColor = [226, 232, 240]; // #E2E8F0
 
-  const gymName = (settings.gymName || 'MS FITNESS').toUpperCase();
+  const gymName = (settings.gymName || 'AB GYM').toUpperCase();
   const gymTagline = settings.tagline || 'Stronger Body, Stronger You';
   const gymPhone = settings.phone || '+91 85878 82431';
-  const gymEmail = settings.email || 'support@msfitness.com';
-  const gymAddress = settings.address || 'MS Fitness Complex, New Delhi - 110075';
+  const gymEmail = settings.email || 'support@abgym.com';
+  const gymAddress = settings.address || 'Civil Lines, Near Stadium, New Delhi';
 
-  const rollNumber = member.rollNumber || member.rollNo || 'MS-26-0000';
+  const rollNumber = member.rollNumber || member.rollNo || 'ABG-26-0000';
   const memberName = (member.fullName || member.name || 'Valued Member').trim();
   const memberPhone = member.phone || member.phoneNumber || 'N/A';
   const memberEmail = member.email || member.emailAddress || 'N/A';
   const memberAddress = member.address || 'Registered with Gym';
 
   const todayStr = new Date().toISOString().split('T')[0];
-  const invoiceNo = `INV-MS-${new Date().getFullYear()}-${rollNumber.replace(/[^a-zA-Z0-9]/g, '')}`;
+  const invoiceNo = `INV-AB-${new Date().getFullYear()}-${rollNumber.replace(/[^a-zA-Z0-9]/g, '')}`;
   const invoiceDate = payment?.paymentDate || member.lastPaymentDate || todayStr;
   const dueDate = member.membershipExpiry || member.expiryDate || 'Immediate';
 
@@ -1379,7 +1379,7 @@ export async function downloadMemberInvoicePDF(member: Member, settings: GymSett
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.text('MS FITNESS ACCOUNTS & BILLING', 14, y + 6);
+  doc.text(`${gymName} ACCOUNTS & BILLING`, 14, y + 6);
 
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
   doc.setFont('helvetica', 'normal');

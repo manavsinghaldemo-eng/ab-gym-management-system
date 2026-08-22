@@ -14,6 +14,7 @@ import {
   resolveFeePaymentFinancials,
   resolveFirstValidAmount,
   extractPlanPrice,
+  parseTimestampMs,
 } from '../lib/paymentUtils';
 
 import { GOOGLE_APPS_SCRIPT_CODE } from '../lib/googleAppsScriptSource';
@@ -31,7 +32,8 @@ import { MemberCardModal } from '../components/MemberCardModal';
 import { ReceiptModal } from '../components/ReceiptModal';
 import { MemberDetailsModal } from '../components/MemberDetailsModal';
 import { PaymentDetailsModal } from '../components/PaymentDetailsModal';
-import { getStoredSettings, saveSettings, getStoredAttendance, markMemberAttendance, getStoredMembers, getStoredPlans, updateMemberInStorage, directAddMemberToStorage } from '../lib/storage';
+import { AdminManagement } from '../components/AdminManagement';
+import { getStoredSettings, saveSettings, getStoredAttendance, markMemberAttendance, getStoredMembers, getStoredRegistrations, getStoredPlans, updateMemberInStorage, updateRegistrationInStorage, directAddMemberToStorage, getStoredAdminUsers } from '../lib/storage';
 import { AB_FITNESS_UPI_ID } from '../data/initialData';
 import abGymLogo from '../assets/logo';
 
@@ -594,6 +596,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     if (path.includes('/admin/payment-history')) return 'payment-history';
     if (path.includes('/admin/attendance')) return 'attendance';
     if (path.includes('/admin/reminders')) return 'reminders';
+    if (path.includes('/admin/admins') || path.includes('/admin/admin-users')) return 'admins';
     if (path.includes('/admin/settings')) return 'settings';
     return 'dashboard';
   };
@@ -615,6 +618,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
   const [members, setMembers] = useState<Member[]>([]);
   const [feePayments, setFeePayments] = useState<FeePaymentRecord[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLogRecord[]>([]);
+  const [adminUsers, setAdminUsers] = useState<any[]>(getStoredAdminUsers());
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(getStoredAttendance());
   const [scanQuery, setScanQuery] = useState('');
   const [scanMessage, setScanMessage] = useState<{ success: boolean; text: string; member?: Member } | null>(null);
@@ -1379,13 +1383,36 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
     const token = getSavedAdminToken();
     try {
       const regRes = await apiService.getRegistrations(token);
+      let remoteRegs: RegistrationRequest[] = [];
       if (regRes && regRes.success !== false) {
         const records = (regRes as any)?.data?.records ?? (Array.isArray((regRes as any)?.data) ? (regRes as any).data : ((regRes as any)?.records ?? []));
-        const mappedRecords: RegistrationRequest[] = (Array.isArray(records) ? records : []).map((record: any, idx: number) => normalizeRegistration(record, idx));
-        setRegistrations(mappedRecords);
+        remoteRegs = (Array.isArray(records) ? records : []).map((record: any, idx: number) => normalizeRegistration(record, idx));
+      }
+
+      const localRegs = getStoredRegistrations();
+      if (localRegs && localRegs.length > 0) {
+        const mergedMap = new Map<string, RegistrationRequest>();
+        remoteRegs.forEach(r => {
+          const key = (r.registrationReferenceNumber || r.registrationRef || r.referenceNumber || r.id || '').trim().toUpperCase();
+          if (key) mergedMap.set(key, r);
+        });
+        localRegs.forEach(r => {
+          const key = (r.registrationReferenceNumber || r.registrationRef || r.referenceNumber || r.id || '').trim().toUpperCase();
+          if (key) {
+            const normalizedLocal = normalizeRegistration(r, 0);
+            const existing = mergedMap.get(key);
+            if (!existing || parseTimestampMs(r.updatedAt || (r as any).timestamp || 0) >= parseTimestampMs((existing as any).updatedAt || existing.timestamp || 0)) {
+              mergedMap.set(key, { ...existing, ...normalizedLocal });
+            }
+          }
+        });
+        setRegistrations(Array.from(mergedMap.values()));
+      } else {
+        setRegistrations(remoteRegs);
       }
     } catch (err) {
       console.error('Error fetching registrations:', err);
+      setRegistrations(getStoredRegistrations().map((r, idx) => normalizeRegistration(r, idx)));
     }
   }, []);
 
@@ -1411,8 +1438,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
           if (key) {
             const normalizedLocal = normalizeMember(m, 0);
             const existing = mergedMap.get(key);
-            if (!existing || new Date(m.updatedAt || m.timestamp || 0) >= new Date(existing.updatedAt || existing.timestamp || 0)) {
-              mergedMap.set(key, normalizedLocal);
+            if (!existing || parseTimestampMs(m.updatedAt || m.timestamp || 0) >= parseTimestampMs((existing as any).updatedAt || (existing as any).lastUpdated || existing.timestamp || 0)) {
+              mergedMap.set(key, { ...existing, ...normalizedLocal });
             }
           }
         });
@@ -1512,20 +1539,63 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
 
       const mappedRecords: RegistrationRequest[] = (Array.isArray(records) ? records : []).map((record: any, idx: number) => normalizeRegistration(record, idx));
       console.log('Mapped records:', mappedRecords);
-      setRegistrations(mappedRecords);
+
+      const localRegs = getStoredRegistrations();
+      let finalRegistrations = mappedRecords;
+      if (localRegs && localRegs.length > 0) {
+        const regMap = new Map<string, RegistrationRequest>();
+        mappedRecords.forEach(r => {
+          const key = (r.registrationReferenceNumber || r.registrationRef || r.referenceNumber || r.id || '').trim().toUpperCase();
+          if (key) regMap.set(key, r);
+        });
+        localRegs.forEach(r => {
+          const key = (r.registrationReferenceNumber || r.registrationRef || r.referenceNumber || r.id || '').trim().toUpperCase();
+          if (key) {
+            const norm = normalizeRegistration(r, 0);
+            const existing = regMap.get(key);
+            if (!existing || parseTimestampMs(r.updatedAt || (r as any).timestamp || 0) >= parseTimestampMs((existing as any).updatedAt || existing.timestamp || 0)) {
+              regMap.set(key, { ...existing, ...norm });
+            }
+          }
+        });
+        finalRegistrations = Array.from(regMap.values());
+      }
+      setRegistrations(finalRegistrations);
 
       const parsedMembers: Member[] = (memRes && memRes.success !== false)
         ? ((memRes as any)?.data?.records ?? (Array.isArray((memRes as any)?.data) ? (memRes as any).data : ((memRes as any)?.records ?? []))).map((m: any, idx: number) => normalizeMember(m, idx))
         : [];
-      setMembers(parsedMembers);
+
+      const localMembers = getStoredMembers();
+      let finalMembers = parsedMembers;
+      if (localMembers && localMembers.length > 0) {
+        const memMap = new Map<string, Member>();
+        parsedMembers.forEach(m => {
+          const key = (m.rollNumber || m.id || '').trim().toUpperCase();
+          if (key) memMap.set(key, m);
+        });
+        localMembers.forEach(m => {
+          const key = (m.rollNumber || m.id || '').trim().toUpperCase();
+          if (key) {
+            const norm = normalizeMember(m, 0);
+            const existing = memMap.get(key);
+            if (!existing || parseTimestampMs(m.updatedAt || m.timestamp || 0) >= parseTimestampMs((existing as any).updatedAt || (existing as any).lastUpdated || existing.timestamp || 0)) {
+              memMap.set(key, { ...existing, ...norm });
+            }
+          }
+        });
+        finalMembers = Array.from(memMap.values());
+      }
+      setMembers(finalMembers);
 
       // Process & Map Fee Payments
       console.log("Raw fee response:", feeRes);
 
       const rawFeeRecords = (feeRes as any)?.data?.records ?? (Array.isArray((feeRes as any)?.data) ? (feeRes as any).data : ((feeRes as any)?.records ?? []));
-      const mappedFeeRecords = (Array.isArray(rawFeeRecords) ? rawFeeRecords : []).map((record: any, idx: number) => normalizeFeePayment(record, idx, parsedMembers, mappedRecords));
+      const mappedFeeRecords = (Array.isArray(rawFeeRecords) ? rawFeeRecords : []).map((record: any, idx: number) => normalizeFeePayment(record, idx, finalMembers, finalRegistrations));
       console.log("Mapped fee records:", mappedFeeRecords);
       setFeePayments(mappedFeeRecords);
+
 
       if (dashRes && dashRes.success !== false && dashRes.data?.stats) {
         setStats(dashRes.data.stats);
@@ -1537,6 +1607,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
         setActivityLogs((Array.isArray(logData) ? logData : []).map((l: any, idx: number) => normalizeActivityLog(l, idx)));
       } else {
         setActivityLogs([]);
+      }
+
+      // Also refresh Admin Users list
+      try {
+        const adminsRes = await apiService.getAdminUsers(token);
+        if (adminsRes && adminsRes.success && Array.isArray(adminsRes.data)) {
+          setAdminUsers(adminsRes.data);
+        } else {
+          setAdminUsers(getStoredAdminUsers());
+        }
+      } catch (adminErr) {
+        setAdminUsers(getStoredAdminUsers());
       }
     } catch (err) {
       console.error('Error fetching admin data:', err);
@@ -3829,6 +3911,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
               { id: 'payment-history', label: 'Payment Ledger', icon: History, count: feePayments.length, countColor: 'bg-zinc-800 text-zinc-300 border-zinc-700', path: '/admin/payment-history' },
               { id: 'reminders', label: 'Payment Reminders', icon: BellRing, count: dueMembersAnalysis.all.length, countColor: 'bg-rose-500/20 text-rose-300 border-rose-500/40', path: '/admin/reminders' },
               { id: 'attendance', label: 'QR Attendance', icon: QrCode, count: attendanceRecords.filter(a => a.date === new Date().toISOString().split('T')[0]).length, countColor: 'bg-blue-500/20 text-blue-400 border-blue-500/40', path: '/admin/attendance' },
+              { id: 'admins', label: 'Admins', icon: ShieldCheck, count: adminUsers.length, countColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40', path: '/admin/admins' },
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -6224,6 +6307,37 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
             className="space-y-8 max-w-4xl mx-auto"
           >
+            {/* SECTION 0: MULTI-ADMIN & STAFF ACCESS */}
+            <div className="bg-gradient-to-br from-[#12141a] to-[#0d0f14] border border-emerald-500/30 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-emerald-400 shrink-0 mt-0.5">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-black text-white uppercase tracking-wide flex items-center gap-2">
+                      <span>Admin &amp; Staff Access Control</span>
+                      <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 text-[10px] rounded-full border border-emerald-500/40 font-mono">
+                        {adminUsers.length} Active Accounts
+                      </span>
+                    </h2>
+                    <p className="text-xs text-zinc-400 mt-1 max-w-xl">
+                      Add and manage multiple administrators, front-desk staff, and shift managers with distinct roles and secure passcodes.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleTabChange('admins')}
+                  className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2 shrink-0 border border-emerald-400/20"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Manage Admins</span>
+                </button>
+              </div>
+            </div>
+
             {/* SECTION 1: UPI PAYMENT & QR CODE SETTINGS */}
             <form onSubmit={handleSaveGymSettings} className="bg-[#0F0F12] border border-zinc-800/80 rounded-3xl p-6 space-y-6 shadow-xl">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-800/80 pb-4 gap-3">
@@ -6452,6 +6566,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentPath = '/admin/dash
                 Refresh Google Sheet Data
               </button>
             </div>
+          </motion.div>
+        )}
+
+        {/* TAB 8: ADMIN & STAFF ACCESS MANAGEMENT */}
+        {activeTab === 'admins' && (
+          <motion.div
+            key="admins"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -14 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <AdminManagement
+              currentAdminName={localStorage.getItem(ADMIN_STORAGE_KEYS.USER) || sessionStorage.getItem(ADMIN_STORAGE_KEYS.USER) || 'Super Admin'}
+              adminToken={getSavedAdminToken()}
+              onActivityLogged={loadLiveData}
+            />
           </motion.div>
         )}
         </AnimatePresence>

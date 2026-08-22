@@ -219,6 +219,27 @@ export interface GalleryItem {
   description?: string;
 }
 
+export type AdminRole = 'Super Admin' | 'Admin' | 'Manager' | 'Staff' | 'Receptionist';
+
+export interface AdminUser {
+  id: string;
+  name: string;
+  fullName?: string;
+  email: string;
+  phone?: string;
+  phoneNumber?: string;
+  role: AdminRole;
+  passcode: string;
+  password?: string;
+  status: 'Active' | 'Inactive';
+  permissions?: string[];
+  createdAt: string;
+  updatedAt?: string;
+  lastLoginAt?: string;
+  addedBy?: string;
+  notes?: string;
+}
+
 export interface GymSettings {
   gymName: string;
   tagline: string;

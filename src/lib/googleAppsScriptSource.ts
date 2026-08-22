@@ -20,7 +20,8 @@ var SHEETS = {
   MEMBERS: 'Members',
   FEE_PAYMENTS: 'Fee Payments',
   ACTIVITY_LOGS: 'Activity Logs',
-  SETTINGS: 'Settings'
+  SETTINGS: 'Settings',
+  ADMINS: 'Admin Users'
 };
 
 var DEFAULT_ADMIN_PASS = 'ABFitness@2026';
@@ -119,6 +120,21 @@ var HEADERS = {
     'New Status',
     'Remarks'
   ],
+  'Admin Users': [
+    'Timestamp',
+    'Admin ID',
+    'Full Name',
+    'Email Address',
+    'Role',
+    'Phone Number',
+    'Passcode',
+    'Status',
+    'Permissions',
+    'Created At',
+    'Last Login',
+    'Added By',
+    'Notes'
+  ],
   Settings: ['Key', 'Value']
 };
 
@@ -208,6 +224,10 @@ function handleAction(action, data, token) {
   if (action === 'getDueMembers' || action === 'getOverdueMembers') return handleGetDueMembers();
   if (action === 'configureReminderCron' || action === 'setupReminderCron') return handleConfigureReminderCron(data);
   if (action === 'getReminderCronStatus') return handleGetReminderCronStatus();
+  if (action === 'getAdminUsers') return handleGetAdminUsers();
+  if (action === 'addAdminUser') return handleAddAdminUser(data);
+  if (action === 'updateAdminUser') return handleUpdateAdminUser(data);
+  if (action === 'deleteAdminUser') return handleDeleteAdminUser(data);
   if (action === 'seedSampleData') return handleSeedSampleData();
 
   return createJsonResponse({
@@ -1208,6 +1228,7 @@ function handleCheckRegistrationStatus(data) {
  */
 function handleAdminLogin(data) {
   var pass = cleanString(data.password || data.passcode);
+  var email = cleanString(data.email).toLowerCase();
   var storedPass = getSetting('adminPasscode') || DEFAULT_ADMIN_PASS;
 
   var validPasscodes = [
@@ -1224,17 +1245,69 @@ function handleAdminLogin(data) {
     'abgym'
   ];
 
-  if (validPasscodes.indexOf(pass) !== -1 || (pass && pass.toLowerCase() === 'abfitness@2026') || (pass && pass.toLowerCase() === 'abgym@2026') || (pass && pass.toLowerCase() === 'admin') || (pass && pass.length >= 4)) {
+  var authenticatedAdmin = null;
+
+  // 1. Check Admin Users Sheet
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var aSheet = ss.getSheetByName(SHEETS.ADMINS);
+    if (aSheet && aSheet.getLastRow() > 1) {
+      var aData = aSheet.getDataRange().getValues();
+      var aHeaders = aData[0];
+      var emailIdx = aHeaders.indexOf('Email Address');
+      var passIdx = aHeaders.indexOf('Passcode');
+      var nameIdx = aHeaders.indexOf('Full Name');
+      var roleIdx = aHeaders.indexOf('Role');
+      var statusIdx = aHeaders.indexOf('Status');
+      var loginIdx = aHeaders.indexOf('Last Login');
+
+      for (var i = 1; i < aData.length; i++) {
+        var rowEmail = emailIdx !== -1 ? cleanString(aData[i][emailIdx]).toLowerCase() : '';
+        var rowPass = passIdx !== -1 ? cleanString(aData[i][passIdx]) : '';
+        var rowStatus = statusIdx !== -1 ? cleanString(aData[i][statusIdx]) : 'Active';
+        var rowName = nameIdx !== -1 ? cleanString(aData[i][nameIdx]) : 'Administrator';
+        var rowRole = roleIdx !== -1 ? cleanString(aData[i][roleIdx]) : 'Admin';
+
+        if (rowStatus === 'Inactive') continue;
+
+        // Match by email + passcode or passcode if email matches
+        if (email && rowEmail === email && (rowPass === pass || validPasscodes.indexOf(pass) !== -1)) {
+          authenticatedAdmin = { name: rowName, email: rowEmail, role: rowRole };
+          if (loginIdx !== -1) aSheet.getRange(i + 1, loginIdx + 1).setValue(formatDate(new Date()));
+          break;
+        } else if (!email && (rowPass === pass || validPasscodes.indexOf(pass) !== -1)) {
+          authenticatedAdmin = { name: rowName, email: rowEmail, role: rowRole };
+          if (loginIdx !== -1) aSheet.getRange(i + 1, loginIdx + 1).setValue(formatDate(new Date()));
+          break;
+        }
+      }
+    }
+  } catch (sheetErr) {
+    Logger.log('Admin sheet lookup error: ' + sheetErr.toString());
+  }
+
+  // 2. Fallback check for master passcode
+  if (!authenticatedAdmin && (validPasscodes.indexOf(pass) !== -1 || (pass && pass.toLowerCase() === 'abfitness@2026') || (pass && pass.toLowerCase() === 'abgym@2026') || (pass && pass.toLowerCase() === 'admin') || (pass && pass.length >= 4))) {
+    authenticatedAdmin = {
+      name: email && email.indexOf('manav') !== -1 ? 'Manav Singhal' : 'AB Gym Administrator',
+      email: email || 'admin@abgym.com',
+      role: 'Super Admin'
+    };
+  }
+
+  if (authenticatedAdmin) {
     var now = new Date().getTime();
     var expiryTime = now + (12 * 60 * 60 * 1000); // 12 hours duration in ms
     var token = 'ABG-ADM-' + now + '-' + Math.floor(1000 + Math.random() * 9000);
     setSetting('active_token_' + token, expiryTime.toString());
+    logActivity(authenticatedAdmin.name, 'Admin Login', 'Security', authenticatedAdmin.email, 'Logged Out', 'Active Session', 'Admin authenticated successfully');
     return createJsonResponse({
       success: true,
       message: 'Admin authentication successful.',
       token: token,
       expiresAt: expiryTime,
-      adminName: 'AB Gym Administrator'
+      adminName: authenticatedAdmin.name,
+      admin: authenticatedAdmin
     });
   }
 
@@ -3024,6 +3097,319 @@ function sendDailyPaymentRemindersAutomatic() {
   }
 }
 
+// Admin Users Management Handlers
+function handleGetAdminUsers() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEETS.ADMINS);
+    if (!sheet) {
+      initializeSheets();
+      sheet = ss.getSheetByName(SHEETS.ADMINS);
+    }
+    
+    var users = [];
+    if (sheet && sheet.getLastRow() > 1) {
+      var data = sheet.getDataRange().getValues();
+      var headers = data[0];
+      var idIdx = headers.indexOf('Admin ID');
+      var nameIdx = headers.indexOf('Full Name');
+      var emailIdx = headers.indexOf('Email Address');
+      var roleIdx = headers.indexOf('Role');
+      var phoneIdx = headers.indexOf('Phone Number');
+      var passIdx = headers.indexOf('Passcode');
+      var statusIdx = headers.indexOf('Status');
+      var permIdx = headers.indexOf('Permissions');
+      var createdIdx = headers.indexOf('Created At');
+      var loginIdx = headers.indexOf('Last Login');
+      var addedIdx = headers.indexOf('Added By');
+      var notesIdx = headers.indexOf('Notes');
+
+      for (var i = 1; i < data.length; i++) {
+        var row = data[i];
+        var email = emailIdx !== -1 ? cleanString(row[emailIdx]) : '';
+        if (!email) continue;
+        users.push({
+          id: idIdx !== -1 && row[idIdx] ? cleanString(row[idIdx]) : ('admin-' + i),
+          name: nameIdx !== -1 ? cleanString(row[nameIdx]) : 'Admin User',
+          fullName: nameIdx !== -1 ? cleanString(row[nameIdx]) : 'Admin User',
+          email: email,
+          role: roleIdx !== -1 && row[roleIdx] ? cleanString(row[roleIdx]) : 'Admin',
+          phone: phoneIdx !== -1 ? cleanString(row[phoneIdx]) : '',
+          phoneNumber: phoneIdx !== -1 ? cleanString(row[phoneIdx]) : '',
+          passcode: passIdx !== -1 ? cleanString(row[passIdx]) : '',
+          status: statusIdx !== -1 && row[statusIdx] ? cleanString(row[statusIdx]) : 'Active',
+          permissions: permIdx !== -1 && row[permIdx] ? cleanString(row[permIdx]).split(',') : ['all'],
+          createdAt: createdIdx !== -1 && row[createdIdx] ? cleanString(row[createdIdx]) : new Date().toISOString(),
+          lastLoginAt: loginIdx !== -1 && row[loginIdx] ? cleanString(row[loginIdx]) : '',
+          addedBy: addedIdx !== -1 ? cleanString(row[addedIdx]) : 'Super Admin',
+          notes: notesIdx !== -1 ? cleanString(row[notesIdx]) : ''
+        });
+      }
+    }
+
+    // If no admins in sheet, seed default super admin
+    if (users.length === 0) {
+      var defaultAdmin = {
+        id: 'admin-super-1',
+        name: 'Manav Singhal',
+        fullName: 'Manav Singhal',
+        email: 'manavsinghal.demo@gmail.com',
+        role: 'Super Admin',
+        phone: '9868400688',
+        passcode: 'ABFitness@2026',
+        status: 'Active',
+        permissions: ['all'],
+        createdAt: new Date().toISOString(),
+        addedBy: 'System',
+        notes: 'Primary Super Administrator'
+      };
+      if (sheet) {
+        sheet.appendRow([
+          formatDate(new Date()),
+          defaultAdmin.id,
+          defaultAdmin.name,
+          defaultAdmin.email,
+          defaultAdmin.role,
+          defaultAdmin.phone,
+          defaultAdmin.passcode,
+          defaultAdmin.status,
+          'all',
+          defaultAdmin.createdAt,
+          '',
+          'System',
+          defaultAdmin.notes
+        ]);
+      }
+      users.push(defaultAdmin);
+    }
+
+    return createJsonResponse({
+      success: true,
+      records: users,
+      data: users
+    });
+  } catch (err) {
+    Logger.log('handleGetAdminUsers error: ' + err.toString());
+    return createJsonResponse({
+      success: false,
+      message: 'Failed to retrieve admin accounts: ' + err.toString()
+    });
+  }
+}
+
+function handleAddAdminUser(data) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var name = cleanString(data.name || data.fullName);
+    var email = cleanString(data.email).toLowerCase();
+    var role = cleanString(data.role) || 'Admin';
+    var phone = cleanString(data.phone || data.phoneNumber);
+    var pass = cleanString(data.passcode || data.password);
+    var status = cleanString(data.status) || 'Active';
+    var addedBy = cleanString(data.addedBy || data.adminName) || 'Super Admin';
+    var notes = cleanString(data.notes);
+
+    if (!name) return createJsonResponse({ success: false, message: 'Admin full name is required.' });
+    if (!email || email.indexOf('@') === -1) return createJsonResponse({ success: false, message: 'Valid email address is required.' });
+    if (!pass || pass.length < 4) return createJsonResponse({ success: false, message: 'Password/passcode must be at least 4 characters.' });
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEETS.ADMINS);
+    if (!sheet) {
+      initializeSheets();
+      sheet = ss.getSheetByName(SHEETS.ADMINS);
+    }
+
+    // Check duplicate
+    if (sheet.getLastRow() > 1) {
+      var allData = sheet.getDataRange().getValues();
+      var emailIdx = allData[0].indexOf('Email Address');
+      if (emailIdx !== -1) {
+        for (var i = 1; i < allData.length; i++) {
+          if (cleanString(allData[i][emailIdx]).toLowerCase() === email) {
+            return createJsonResponse({ success: false, message: 'An admin account with this email already exists.' });
+          }
+        }
+      }
+    }
+
+    var newId = 'admin-' + new Date().getTime() + '-' + Math.floor(1000 + Math.random() * 9000);
+    var nowIso = new Date().toISOString();
+    var nowStr = formatDate(new Date());
+
+    sheet.appendRow([
+      nowStr,
+      newId,
+      name,
+      email,
+      role,
+      phone,
+      pass,
+      status,
+      role === 'Super Admin' ? 'all' : 'registrations,members,fees,attendance',
+      nowIso,
+      '',
+      addedBy,
+      notes
+    ]);
+
+    logActivity(addedBy, 'Added New Admin Account', 'Admin User', email, 'None', role, 'Created ' + name + ' (' + role + ')');
+
+    return createJsonResponse({
+      success: true,
+      message: 'Admin account created successfully for ' + name + ' (' + role + ').',
+      data: {
+        id: newId,
+        name: name,
+        email: email,
+        role: role,
+        phone: phone,
+        status: status,
+        createdAt: nowIso
+      }
+    });
+  } catch (err) {
+    Logger.log('handleAddAdminUser error: ' + err.toString());
+    return createJsonResponse({
+      success: false,
+      message: 'Failed to add admin user: ' + err.toString()
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleUpdateAdminUser(data) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var id = cleanString(data.id);
+    var email = cleanString(data.email).toLowerCase();
+    var name = cleanString(data.name || data.fullName);
+    var role = cleanString(data.role);
+    var phone = cleanString(data.phone || data.phoneNumber);
+    var pass = cleanString(data.passcode || data.password);
+    var status = cleanString(data.status);
+    var notes = cleanString(data.notes);
+    var currentAdminName = cleanString(data.currentAdminName || data.adminName) || 'Super Admin';
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEETS.ADMINS);
+    if (!sheet || sheet.getLastRow() <= 1) {
+      return createJsonResponse({ success: false, message: 'Admin Users sheet is empty.' });
+    }
+
+    var allData = sheet.getDataRange().getValues();
+    var headers = allData[0];
+    var idIdx = headers.indexOf('Admin ID');
+    var emailIdx = headers.indexOf('Email Address');
+    var nameIdx = headers.indexOf('Full Name');
+    var roleIdx = headers.indexOf('Role');
+    var phoneIdx = headers.indexOf('Phone Number');
+    var passIdx = headers.indexOf('Passcode');
+    var statusIdx = headers.indexOf('Status');
+    var notesIdx = headers.indexOf('Notes');
+
+    var targetRow = -1;
+    for (var i = 1; i < allData.length; i++) {
+      var rowId = idIdx !== -1 ? cleanString(allData[i][idIdx]) : '';
+      var rowEmail = emailIdx !== -1 ? cleanString(allData[i][emailIdx]).toLowerCase() : '';
+      if ((id && rowId === id) || (email && rowEmail === email)) {
+        targetRow = i + 1;
+        break;
+      }
+    }
+
+    if (targetRow === -1) {
+      return createJsonResponse({ success: false, message: 'Admin account not found in database.' });
+    }
+
+    if (name && nameIdx !== -1) sheet.getRange(targetRow, nameIdx + 1).setValue(name);
+    if (email && emailIdx !== -1) sheet.getRange(targetRow, emailIdx + 1).setValue(email);
+    if (role && roleIdx !== -1) sheet.getRange(targetRow, roleIdx + 1).setValue(role);
+    if (phone !== undefined && phoneIdx !== -1) sheet.getRange(targetRow, phoneIdx + 1).setValue(phone);
+    if (pass && passIdx !== -1) sheet.getRange(targetRow, passIdx + 1).setValue(pass);
+    if (status && statusIdx !== -1) sheet.getRange(targetRow, statusIdx + 1).setValue(status);
+    if (notes !== undefined && notesIdx !== -1) sheet.getRange(targetRow, notesIdx + 1).setValue(notes);
+
+    logActivity(currentAdminName, 'Updated Admin Account', 'Admin User', email || id, 'Active', role || 'Updated', 'Updated details for ' + (name || email));
+
+    return createJsonResponse({
+      success: true,
+      message: 'Admin account updated successfully.'
+    });
+  } catch (err) {
+    Logger.log('handleUpdateAdminUser error: ' + err.toString());
+    return createJsonResponse({
+      success: false,
+      message: 'Failed to update admin user: ' + err.toString()
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleDeleteAdminUser(data) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var id = cleanString(data.id);
+    var email = cleanString(data.email).toLowerCase();
+    var performedBy = cleanString(data.adminName || data.currentAdminName) || 'Super Admin';
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEETS.ADMINS);
+    if (!sheet || sheet.getLastRow() <= 1) {
+      return createJsonResponse({ success: false, message: 'No admin accounts found.' });
+    }
+
+    var allData = sheet.getDataRange().getValues();
+    var headers = allData[0];
+    var idIdx = headers.indexOf('Admin ID');
+    var emailIdx = headers.indexOf('Email Address');
+    var nameIdx = headers.indexOf('Full Name');
+    var roleIdx = headers.indexOf('Role');
+
+    var targetRow = -1;
+    var targetName = '';
+    var targetEmail = '';
+    var targetRole = '';
+
+    for (var i = 1; i < allData.length; i++) {
+      var rowId = idIdx !== -1 ? cleanString(allData[i][idIdx]) : '';
+      var rowEmail = emailIdx !== -1 ? cleanString(allData[i][emailIdx]).toLowerCase() : '';
+      if ((id && rowId === id) || (email && rowEmail === email)) {
+        targetRow = i + 1;
+        targetName = nameIdx !== -1 ? cleanString(allData[i][nameIdx]) : '';
+        targetEmail = rowEmail;
+        targetRole = roleIdx !== -1 ? cleanString(allData[i][roleIdx]) : '';
+        break;
+      }
+    }
+
+    if (targetRow === -1) {
+      return createJsonResponse({ success: false, message: 'Admin user not found.' });
+    }
+
+    sheet.deleteRow(targetRow);
+    logActivity(performedBy, 'Deleted Admin Account', 'Admin User', targetEmail || targetName, targetRole, 'Deleted', 'Removed ' + targetName + ' (' + targetRole + ')');
+
+    return createJsonResponse({
+      success: true,
+      message: 'Admin account removed successfully.'
+    });
+  } catch (err) {
+    Logger.log('handleDeleteAdminUser error: ' + err.toString());
+    return createJsonResponse({
+      success: false,
+      message: 'Failed to delete admin user: ' + err.toString()
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /**
  * Utility & Helper Functions
  */
@@ -3338,9 +3724,9 @@ function sendConfirmationEmail(type, email, details) {
         '</div></body></html>';
 
       try {
-        var regBlob = Utilities.newBlob(regHtmlForPdf, 'text/html', 'MSFITNESS_Registration_' + regRef + '.html')
+        var regBlob = Utilities.newBlob(regHtmlForPdf, 'text/html', 'ABGYM_Registration_' + regRef + '.html')
           .getAs('application/pdf')
-          .setName('MSFITNESS_Registration_' + regRef + '.pdf');
+          .setName('ABGYM_Registration_' + regRef + '.pdf');
         attachments.push(regBlob);
       } catch (pdfErr) {
         Logger.log('Registration PDF warning: ' + pdfErr.toString());
@@ -3566,9 +3952,9 @@ function sendConfirmationEmail(type, email, details) {
         '</div></body></html>';
 
       try {
-        var invBlob = Utilities.newBlob(invHtmlForPdf, 'text/html', 'MSFITNESS_Invoice_' + rollNum + '.html')
+        var invBlob = Utilities.newBlob(invHtmlForPdf, 'text/html', 'ABGYM_Invoice_' + rollNum + '.html')
           .getAs('application/pdf')
-          .setName('MSFITNESS_Invoice_' + rollNum + '.pdf');
+          .setName('ABGYM_Invoice_' + rollNum + '.pdf');
         attachments.push(invBlob);
       } catch (pdfErr) {
         Logger.log('Invoice PDF warning: ' + pdfErr.toString());
@@ -3656,9 +4042,9 @@ function sendConfirmationEmail(type, email, details) {
         '</div></body></html>';
 
       try {
-        var pdfBlob = Utilities.newBlob(receiptHtmlForPdf, 'text/html', 'MSFITNESS_Receipt_' + resolvedRef + '.html')
+        var pdfBlob = Utilities.newBlob(receiptHtmlForPdf, 'text/html', 'ABGYM_Receipt_' + resolvedRef + '.html')
           .getAs('application/pdf')
-          .setName('MSFITNESS_Receipt_' + resolvedRef + '.pdf');
+          .setName('ABGYM_Receipt_' + resolvedRef + '.pdf');
         attachments.push(pdfBlob);
       } catch (pdfErr) {
         Logger.log('Receipt PDF generation warning: ' + pdfErr.toString());

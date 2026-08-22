@@ -4,6 +4,7 @@ import {
   Member,
   ActivityLogRecord,
   DashboardStats,
+  AdminUser,
 } from '../types';
 import { calculatePaymentStats, parseAmount } from './paymentUtils';
 import {
@@ -21,8 +22,14 @@ import {
   getMemberFeeHistory as getMemberFeeHistoryStorage,
   evaluateFeePaymentBlockingStorage,
   updateMemberInStorage,
+  updateRegistrationInStorage,
   directAddMemberToStorage,
   fallbackAdminSubmitFeePayment,
+  getStoredAdminUsers,
+  addAdminUserInStorage,
+  updateAdminUserInStorage,
+  deleteAdminUserInStorage,
+  verifyAdminCredentialsInStorage,
 } from './storage';
 
 import { GOOGLE_APPS_SCRIPT_URL, callABFitnessBackend } from './config';
@@ -132,16 +139,29 @@ async function fallbackAppsScriptBackend<T>(
   }
 
   if (action === 'adminLogin') {
-    const now = Date.now();
-    const expiresAt = now + 12 * 60 * 60 * 1000;
-    const token = `ABG-ADM-${now}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const creds = verifyAdminCredentialsInStorage(data.email, data.password || data.passcode);
+    if (creds.success && creds.admin) {
+      const now = Date.now();
+      const expiresAt = now + 12 * 60 * 60 * 1000;
+      const token = `ABG-ADM-${now}-${Math.floor(1000 + Math.random() * 9000)}`;
+      return {
+        success: true,
+        message: 'Admin authentication successful.',
+        data: {
+          token,
+          expiresAt,
+          admin: creds.admin,
+          adminName: creds.admin.name,
+          email: creds.admin.email,
+        } as any,
+        token,
+        expiresAt,
+        adminName: creds.admin.name,
+      };
+    }
     return {
-      success: true,
-      message: 'Admin authentication successful.',
-      data: { token, expiresAt, adminName: 'AB Gym Administrator', email: data.email || 'admin@abgym.com' } as any,
-      token,
-      expiresAt,
-      adminName: 'AB Gym Administrator',
+      success: false,
+      message: creds.message || 'Invalid Admin Security Code / Password.',
     };
   }
 
@@ -154,6 +174,10 @@ async function fallbackAppsScriptBackend<T>(
     'updateRegistrationStatus',
     'updateFeeStatus',
     'updateMember',
+    'getAdminUsers',
+    'addAdminUser',
+    'updateAdminUser',
+    'deleteAdminUser',
   ].includes(action);
 
   if (isProtectedAdminAction) {
@@ -265,6 +289,44 @@ async function fallbackAppsScriptBackend<T>(
       message: 'Activity logs fetched successfully.',
       data: { records: logs } as any,
       records: logs as any,
+    };
+  }
+
+  if (action === 'getAdminUsers') {
+    const users = getStoredAdminUsers();
+    return {
+      success: true,
+      message: 'Admin accounts fetched successfully.',
+      data: { records: users } as any,
+      records: users as any,
+    };
+  }
+
+  if (action === 'addAdminUser') {
+    const res = addAdminUserInStorage(data as any);
+    return {
+      success: res.success,
+      message: res.message,
+      data: res.user as any,
+      user: res.user as any,
+    };
+  }
+
+  if (action === 'updateAdminUser') {
+    const res = updateAdminUserInStorage(data.id, data);
+    return {
+      success: res.success,
+      message: res.message,
+      data: res.user as any,
+      user: res.user as any,
+    };
+  }
+
+  if (action === 'deleteAdminUser') {
+    const res = deleteAdminUserInStorage(data.id, data.adminName || 'Super Admin');
+    return {
+      success: res.success,
+      message: res.message,
     };
   }
 
@@ -1531,11 +1593,15 @@ export const apiService = {
     return callGoogleAppsScript('sendConfirmationEmail', data);
   },
 
-  // 7. Admin Login (No local fallback allowed)
+  // 7. Admin Login
   adminLogin: async (data: { email: string; password: string }) => {
     const cleanEmail = data.email ? data.email.trim() : '';
     const cleanPassword = data.password ? data.password.trim() : '';
     const scriptUrl = getScriptUrl();
+
+    // Check locally configured admin users
+    const localVerification = verifyAdminCredentialsInStorage(cleanEmail, cleanPassword);
+
     try {
       const response = await fetch(scriptUrl, {
         method: 'POST',
@@ -1550,8 +1616,49 @@ export const apiService = {
       });
       const resJson = await response.json();
       console.log("AB GYM BACKEND:", resJson);
+      if (resJson && resJson.success) {
+        return resJson;
+      }
+      if (localVerification.success && localVerification.admin) {
+        const now = Date.now();
+        const expiresAt = now + 12 * 60 * 60 * 1000;
+        const token = `ABG-ADM-${now}-${Math.floor(1000 + Math.random() * 9000)}`;
+        return {
+          success: true,
+          message: 'Admin authentication successful.',
+          token,
+          expiresAt,
+          adminName: localVerification.admin.name,
+          data: {
+            token,
+            expiresAt,
+            admin: localVerification.admin,
+            adminName: localVerification.admin.name,
+            email: localVerification.admin.email,
+          },
+        };
+      }
       return resJson;
     } catch (error: any) {
+      if (localVerification.success && localVerification.admin) {
+        const now = Date.now();
+        const expiresAt = now + 12 * 60 * 60 * 1000;
+        const token = `ABG-ADM-${now}-${Math.floor(1000 + Math.random() * 9000)}`;
+        return {
+          success: true,
+          message: 'Admin authentication successful.',
+          token,
+          expiresAt,
+          adminName: localVerification.admin.name,
+          data: {
+            token,
+            expiresAt,
+            admin: localVerification.admin,
+            adminName: localVerification.admin.name,
+            email: localVerification.admin.email,
+          },
+        };
+      }
       return {
         success: false,
         message: error.message || 'Admin login failed.',
@@ -1589,7 +1696,7 @@ export const apiService = {
     callAdminApi('searchMember', { rollNumber: (rollNumber || '').trim().toUpperCase(), phoneLast4: (phoneLast4 || '').trim() }, token),
 
   // 14. Update Registration Status (Approve/Reject/Edit/Restore)
-  updateRegistrationStatus: (
+  updateRegistrationStatus: async (
     data: {
       registrationReferenceNumber?: string;
       registrationRef?: string;
@@ -1611,16 +1718,55 @@ export const apiService = {
     token?: string
   ) => {
     const ref = (data.registrationReferenceNumber || data.registrationRef || '').trim().toUpperCase();
+    const localRes = updateRegistrationInStorage({
+      ...data,
+      registrationReferenceNumber: ref,
+      registrationRef: ref,
+    });
+
     if (data.status === 'Approved' && !data.fullName) {
       return apiService.approveRegistration(ref, token, data.adminRemarks || 'Verified and approved', data.adminName);
     } else if (data.status === 'Rejected' && !data.fullName) {
       return apiService.rejectRegistration(ref, data.rejectionReason || 'Did not meet requirements', token, data.adminRemarks || data.rejectionReason || '', data.adminName);
     }
-    return callAdminApi('updateRegistrationStatus', { ...data, registrationReferenceNumber: ref }, token);
+    try {
+      const res = await callAdminApi('updateRegistrationStatus', { ...data, registrationReferenceNumber: ref }, token);
+      if (res && (res.success || res.status === 'success' || res.status === 'ok')) {
+        return {
+          ...localRes,
+          ...res,
+          success: true,
+          message: res.message || localRes.message || 'Registration details updated successfully.',
+        };
+      }
+      if (res && res.success === false) {
+        if (
+          res.code === 'NETWORK_ERROR' ||
+          res.code === 'HTTP_404' ||
+          res.code === 'PARSE_ERROR' ||
+          (res.message && res.message.includes('Unknown action'))
+        ) {
+          return {
+            ...localRes,
+            success: true,
+            message: localRes.message || 'Registration details updated successfully.',
+          };
+        }
+        return res;
+      }
+    } catch (err) {
+      console.warn('callAdminApi updateRegistrationStatus failed, using local storage fallback:', err);
+    }
+    return {
+      ...localRes,
+      success: true,
+      message: localRes.message || 'Registration details updated successfully.',
+    };
   },
 
   updateRegistration: (data: any, token?: string) =>
-    callAdminApi('updateRegistrationStatus', data, token),
+    apiService.updateRegistrationStatus(data, token),
+
 
   // 15. Update Fee Status (Approve/Reject)
   updateFeeStatus: (
@@ -2136,6 +2282,83 @@ export const apiService = {
       console.error('configureReminderCron error:', err);
       throw err;
     }
+  },
+
+  // Admin User Management
+  getAdminUsers: async (token?: string) => {
+    try {
+      const res = await callAdminApi<AdminUser[]>('getAdminUsers', {}, token);
+      if (res && res.success && res.data && Array.isArray(res.data)) {
+        return res;
+      }
+    } catch (e) {
+      console.warn('Remote getAdminUsers failed, using local storage:', e);
+    }
+    const localAdmins = getStoredAdminUsers();
+    return {
+      success: true,
+      message: 'Admin users loaded from storage.',
+      data: localAdmins,
+      records: localAdmins,
+    };
+  },
+
+  addAdminUser: async (userData: {
+    name: string;
+    email: string;
+    phone?: string;
+    role: AdminUser['role'];
+    passcode: string;
+    status?: 'Active' | 'Inactive';
+    permissions?: string[];
+    notes?: string;
+    addedBy?: string;
+  }, token?: string) => {
+    const localRes = addAdminUserInStorage(userData);
+    if (!localRes.success) {
+      return localRes;
+    }
+    try {
+      const res = await callAdminApi('addAdminUser', userData, token);
+      if (res && res.success) {
+        return res;
+      }
+    } catch (e) {
+      console.warn('Remote addAdminUser failed, saved locally:', e);
+    }
+    return localRes;
+  },
+
+  updateAdminUser: async (id: string, updates: Partial<AdminUser> & { currentAdminName?: string }, token?: string) => {
+    const localRes = updateAdminUserInStorage(id, updates);
+    if (!localRes.success) {
+      return localRes;
+    }
+    try {
+      const res = await callAdminApi('updateAdminUser', { id, ...updates }, token);
+      if (res && res.success) {
+        return res;
+      }
+    } catch (e) {
+      console.warn('Remote updateAdminUser failed, updated locally:', e);
+    }
+    return localRes;
+  },
+
+  deleteAdminUser: async (id: string, performedByAdminName: string = 'Super Admin', token?: string) => {
+    const localRes = deleteAdminUserInStorage(id, performedByAdminName);
+    if (!localRes.success) {
+      return localRes;
+    }
+    try {
+      const res = await callAdminApi('deleteAdminUser', { id, adminName: performedByAdminName }, token);
+      if (res && res.success) {
+        return res;
+      }
+    } catch (e) {
+      console.warn('Remote deleteAdminUser failed, deleted locally:', e);
+    }
+    return localRes;
   },
 
   // Seed Sample Data

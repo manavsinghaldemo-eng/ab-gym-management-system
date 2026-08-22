@@ -545,3 +545,45 @@ export function calculatePaymentStats(
     totalPreviousBalance,
   };
 }
+
+/**
+ * Universal timestamp parser for local, ISO, and Google Apps Script date formats.
+ * Safely parses "DD/MM/YYYY HH:mm:ss", "YYYY-MM-DD", ISO strings, and Date instances into numeric milliseconds.
+ */
+export function parseTimestampMs(dateVal: any): number {
+  if (!dateVal) return 0;
+  if (typeof dateVal === 'number') return isNaN(dateVal) ? 0 : dateVal;
+  if (dateVal instanceof Date) return isNaN(dateVal.getTime()) ? 0 : dateVal.getTime();
+  
+  const str = String(dateVal).trim();
+  if (!str || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') return 0;
+  
+  // Try standard ISO / direct parsing
+  const parsed = Date.parse(str);
+  if (!isNaN(parsed)) return parsed;
+  
+  // Handle DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY with optional time
+  const ddmmyyyyMatch = str.match(/^(\d{1,2})[/\-. ](\d{1,2})[/\-. ](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (ddmmyyyyMatch) {
+    const day = parseInt(ddmmyyyyMatch[1], 10);
+    const month = parseInt(ddmmyyyyMatch[2], 10) - 1;
+    const year = parseInt(ddmmyyyyMatch[3], 10);
+    const hours = ddmmyyyyMatch[4] ? parseInt(ddmmyyyyMatch[4], 10) : 0;
+    const minutes = ddmmyyyyMatch[5] ? parseInt(ddmmyyyyMatch[5], 10) : 0;
+    const seconds = ddmmyyyyMatch[6] ? parseInt(ddmmyyyyMatch[6], 10) : 0;
+    const d = new Date(year, month, day, hours, minutes, seconds);
+    return isNaN(d.getTime()) ? 0 : d.getTime();
+  }
+  
+  // Handle YYYY/MM/DD or YYYY-MM-DD
+  const yyyymmddMatch = str.match(/^(\d{4})[/\-. ](\d{1,2})[/\-. ](\d{1,2})/);
+  if (yyyymmddMatch) {
+    const year = parseInt(yyyymmddMatch[1], 10);
+    const month = parseInt(yyyymmddMatch[2], 10) - 1;
+    const day = parseInt(yyyymmddMatch[3], 10);
+    const d = new Date(year, month, day);
+    return isNaN(d.getTime()) ? 0 : d.getTime();
+  }
+  
+  return 0;
+}
